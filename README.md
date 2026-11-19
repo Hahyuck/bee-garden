@@ -24,6 +24,16 @@
 
 주소 뒤에 `?q=low` 또는 `?q=med`를 붙이면 사양이 낮은 기기용 화질로 실행됩니다. WebGL2를 지원하는 데스크톱 브라우저를 권장합니다.
 
+## 산행 (Mountain Hike)
+
+**보기: https://hahyuck.github.io/bee-garden/hike.html**
+
+해발 1,600m 가문비나무 숲에서 2,488m 정상까지, 아침에 출발해 구름바다 위로 해가 질 때까지의 1인칭 산행. 여덟 장면 95초이며 `hike.html` 한 파일로 되어 있습니다.
+
+가문비나무 숲 → 개울과 나무다리 → 안개 숲 → 수목한계선의 낙엽송 → 풀밭 비탈 → 안부 → 눈 얹힌 바위 능선 → 석양의 정상
+
+지형은 능선 골격과 프랙탈 노이즈로 만든 높이 함수이고, 등산로는 경사를 따라 일정한 기울기로 오르도록 코드가 찾습니다. 산 그림자는 높이 지도를 따라 광선을 행진시켜 계산하며, 음악(패드·피아노·벨)과 발소리·바람·새·개울 소리는 모두 Web Audio로 합성합니다. 조작 키는 벌의 정원과 같습니다(`V` 제외).
+
 ## 출처
 
-[awesome-fable-5.2 / cat-garden](https://github.com/BubbleBrainBB/awesome-fable-5.2/tree/main/cat-garden)(고양이의 눈으로 본 식물원, 오프라인 패스 트레이싱 영상)의 구상을 벌의 시점으로 바꿔, 브라우저 실시간 버전으로 새로 만든 것입니다. 코드는 Claude(Claude Code)가 작성했습니다.
+[awesome-fable-5.2 / cat-garden](https://github.com/BubbleBrainBB/awesome-fable-5.2/tree/main/cat-garden)(고양이의 눈으로 본 식물원, 오프라인 패스 트레이싱 영상)의 구상을 벌의 시점으로 바꿔, 브라우저 실시간 버전으로 새로 만든 것입니다. 산행은 같은 저장소의 [mountain-hike](https://github.com/BubbleBrainBB/awesome-fable-5.2/tree/main/mountain-hike)를 같은 방식으로 새로 만든 것입니다. 코드는 Claude(Claude Code)가 작성했습니다.
