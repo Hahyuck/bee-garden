@@ -51,6 +51,7 @@
   <input id="seek" type="range" min="0" max="110" step="0.01" value="0">
   <span id="time">0:00 / 1:50</span>
   <button id="bBee" class="opt" title="V">벌의 눈</button>
+  <button id="bSnd" class="on" title="M">소리</button>
   <button id="bCap" class="opt on" title="C">자막</button>
   <button id="bRec" class="opt" title="R">녹화</button>
   <button id="bFull" class="opt" title="F">전체화면</button>
@@ -1062,6 +1063,9 @@ function start() { if (started) return; started = true; $('title').classList.add
 $('go').onclick = start; $('bPlay').onclick = () => setPlay(!playing);
 seek.oninput = () => { dragging = true; T = +seek.value; }; seek.onchange = () => { dragging = false; };
 $('bBee').onclick = () => { beeTarget = beeTarget ? 0 : 1; $('bBee').classList.toggle('on', !!beeTarget); };
+const setMuted = v => { muted = v; try { localStorage.setItem('beegarden.mute', v ? '1' : '0'); } catch (e) {} $('bSnd').classList.toggle('on', !v); $('bSnd').textContent = v ? '소리 꺼짐' : '소리'; };
+try { if (localStorage.getItem('beegarden.mute') === '1') setMuted(true); } catch (e) {}
+$('bSnd').onclick = () => setMuted(!muted);
 $('bCap').onclick = () => { capsOn = !capsOn; $('bCap').classList.toggle('on', capsOn); };
 $('bFull').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
 $('bRec').onclick = () => {
@@ -1075,7 +1079,7 @@ $('bRec').onclick = () => {
 addEventListener('mousemove', wake); addEventListener('touchstart', wake);
 addEventListener('keydown', e => { const k = e.key.toLowerCase(); wake();
   if (k === ' ') { e.preventDefault(); started ? setPlay(!playing) : start(); } else if (k === 'v') $('bBee').click(); else if (k === 'c') $('bCap').click(); else if (k === 'f') $('bFull').click();
-  else if (k === 'r') $('bRec').click(); else if (k === 'm') muted = !muted; else if (k === 'arrowright') T = Math.min(DUR, T + 5); else if (k === 'arrowleft') T = Math.max(0, T - 5); });
+  else if (k === 'r') $('bRec').click(); else if (k === 'm') setMuted(!muted); else if (k === 'arrowright') T = Math.min(DUR, T + 5); else if (k === 'arrowleft') T = Math.max(0, T - 5); });
 function frame(now) {
   requestAnimationFrame(frame); const dt = Math.min((now - last) / 1000, .05); last = now;
   if (playing && !dragging) { T += dt; if (T >= DUR) { T = DUR; setPlay(false); if (rec) rec.stop(); wake(); }

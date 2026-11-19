@@ -34,6 +34,12 @@
 
 지형은 능선 골격과 프랙탈 노이즈로 만든 높이 함수이고, 등산로는 경사를 따라 일정한 기울기로 오르도록 코드가 찾습니다. 산 그림자는 높이 지도를 따라 광선을 행진시켜 계산하며, 음악(패드·피아노·벨)과 발소리·바람·새·개울 소리는 모두 Web Audio로 합성합니다. 조작 키는 벌의 정원과 같습니다(`V` 제외).
 
+## one world — 요새·산·정원을 하나의 세계로
+
+**보기: https://hahyuck.github.io/bee-garden/world/**
+
+바다 위 요새(seafort) 뒤에 산섬을 세우고 산자락에 정원을 놓아, 세 작품을 한 공간에서 이어 봅니다. `0` 이어 보기 · `1` 요새 · `2` 벌 · `3` 산행 · `W A S D` 자유 카메라. 자세한 내용은 [world/README.md](world/README.md), 모아 둔 셰이딩·모델링 묶음은 [world/FXKIT.md](world/FXKIT.md)에 있습니다. 하늘·물·후처리 엔진은 ChetasLua의 Crimson Loong입니다.
+
 ## 출처
 
 [awesome-fable-5.2 / cat-garden](https://github.com/BubbleBrainBB/awesome-fable-5.2/tree/main/cat-garden)(고양이의 눈으로 본 식물원, 오프라인 패스 트레이싱 영상)의 구상을 벌의 시점으로 바꿔, 브라우저 실시간 버전으로 새로 만든 것입니다. 산행은 같은 저장소의 [mountain-hike](https://github.com/BubbleBrainBB/awesome-fable-5.2/tree/main/mountain-hike)를 같은 방식으로 새로 만든 것입니다. 코드는 Claude(Claude Code)가 작성했습니다.
