@@ -89,7 +89,7 @@ const Garden = (() => {
     for (let i = 0; i < 70; i++) { const x = rr(-1.15, .7), z = rr(-4.32, -3.84); B.put('lav' + (i & 1), pl[i & 1], mF, x, 0, z, rr(0, TAU), S * rr(.85, 1.1)); }
     for (let i = 0; i < 110; i++) { const x = rr(-6.2, 4.4), z = R() < .5 ? rr(-3.98, -3.82) : rr(-5.6, -4.7); if (far(x, z, .26)) B.put('hos' + (i & 1), ph[i & 1], mF, x, 0, z, rr(0, TAU), S * rr(.7, 1.4)); }
     const ps = [sunflower(false), sunflower(false)]; [[5.96, -4.24], [6.62, -4.32], [6.94, -3.98], [5.78, -3.84], [7.22, -3.52], [6.5, -4.72]].forEach(([x, z], i) => B.put('sun' + (i & 1), ps[i & 1], mH, x, 0, z, rr(-.5, .5), S * rr(.85, 1.08)));
-    G.info.gardenInst = B.flush(); prog(.6); await tick();
+    G.info.gardenInst = B.flush({ cast: true, receive: true }); prog(.6); await tick();
     const hero = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.setScalar(S); grp.add(m); return m; };
     hero(cosmos(true, 72, '#f08bb8'), mH, COS.x, 0, COS.z); hero(sunflower(true), mH, SH.x - .08, 0, SH.z);
     { // the hive: stand, landing board, two boxes and a roof (the bees' door is the dark slit under the front wall)
@@ -116,6 +116,7 @@ const Garden = (() => {
       Garden.cat = cat; }
     // the bee's own antennae (shown only while the lens is the bee)
     ant = [-1, 1].map(s => { const g = new THREE.Group(); g.add(new THREE.Mesh(K.tag(K.tube([V(), V(s * .1, .12, -.2), V(s * .2, .18, -.38), V(s * .3, .19, -.56)], t => .009 - .004 * t, 5), '#1a1208', 5, K.M([s * .15, .17, -.1])), mS)); g.scale.setScalar(S); g.visible = false; scene.add(g); return g; });
+    grp.traverse(o => { if (o.isMesh && !o.material.transparent) o.castShadow = o.receiveShadow = true; });
     G.tick.push(update); G.info.garden = { ms: Math.round(performance.now() - t0) }; prog(1);
   }
   // ---- everybody else ----

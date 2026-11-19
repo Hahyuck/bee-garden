@@ -26,9 +26,16 @@ const Journey = (() => {
     camera.position.set(a.x + hz * sw, eye - .024 * Math.cos(TAU * ph) * sp, a.z - hx * sw); const cp = Math.cos(pitch); L.set(-Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp);
     m.lookAt(P.set(0, 0, 0), L, UP); camera.quaternion.setFromRotationMatrix(m).multiply(q.setFromAxisAngle(ZAX, Math.sin(Math.PI * ph) * .006 * sp)); camera.fov = 62; return top;
   }
+  // the sun's shadow map follows the lens once it leaves the fort: 75 m around a walker, 7 m around the bee (snapped to texels so it does not swim)
+  const SHQ = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(SUN, new THREE.Vector3(), UP)), SR = new THREE.Vector3(1, 0, 0).applyQuaternion(SHQ), SU = new THREE.Vector3(0, 1, 0).applyQuaternion(SHQ), SC0 = new THREE.Vector3(14, 45, -100);
+  const SHP = [[310, 520, 20, 1100, -.00035, .22], [75, 260, 1, 520, -.00008, .07], [7, 40, 1, 80, -.00004, .0025]]; let shMode = -1;
+  function shadows(camera, k) { const sun = G.sun, sc = sun.shadow.camera, p = SHP[k];
+    if (k !== shMode) { shMode = k; sc.left = sc.bottom = -p[0]; sc.right = sc.top = p[0]; sc.near = p[2]; sc.far = p[3]; sc.updateProjectionMatrix(); sun.shadow.bias = p[4]; sun.shadow.normalBias = p[5]; }
+    if (k === 0) c.copy(SC0); else { const ts = 2 * p[0] / sun.shadow.mapSize.x, cp = camera.position; c.set(0, 0, 0).addScaledVector(SR, Math.round(cp.dot(SR) / ts) * ts).addScaledVector(SU, Math.round(cp.dot(SU) / ts) * ts).addScaledVector(SUN, cp.dot(SUN)); }
+    sun.target.position.copy(c); sun.position.copy(c).addScaledVector(SUN, p[1]); sun.target.updateMatrixWorld(); sun.updateMatrixWorld(); }
   G.walk = (camera, dt) => {
     if (w0) w0(camera, dt);
-    const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); if (fix[6]) camera.fov = fix[6]; camera.near = fix[7] || .5; return; }
+    const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); if (fix[6]) camera.fov = fix[6]; camera.near = fix[7] || .5; shadows(camera, fix[8] !== undefined ? fix[8] : Math.hypot(P.x - 14, P.z + 100) > 300 ? 1 : 0); return; }
     const walking = !!(Walk && Walk.on); if (walking && !wasWalk && mode !== 'fort') { if (cur() === 'bee') Garden.leave(); mode = 'fort'; } wasWalk = walking;
     const t = G.tAbs || 0; tm += dt; camera.near = .5;
     if (mode === 'auto' && tm > SEQ[seg][1]) { if (SEQ[seg][0] === 'bee') Garden.leave(); seg = (seg + 1) % SEQ.length; const s = SEQ[seg]; if (s[0] === 'hike') { f = Math.max(8, s[2] * (T.n - 2) - (s[2] === 1 ? 14 : 6)); dist = 0; } begin(camera, s[0] === 'bee' ? 4 : 0); }
@@ -38,6 +45,7 @@ const Journey = (() => {
     else { const s = SEQ[seg], top = hikePose(camera, dt, t, mode === 'auto' && s[2] === 1 ? T.n - 3 : undefined); extra = '해발 ' + Math.round(camera.position.y - 1.66) + ' m' + (top ? ' · 정상' : '') + (mode === 'hike' ? ' · ↑ 빠르게 ↓ 뒤로' : ''); if (mode === 'hike' && top && tm > 30 && f >= T.n - 3) { f = 8; dist = 0; begin(camera, 0); } }
     if (k !== 'fort' && blend < 1) { blend = Math.min(1, blend + dt / blendT); const e = sm(0, 1, blend); camera.position.lerpVectors(fromP, camera.position, e); camera.position.y += Math.sin(Math.PI * e) * Math.min(60, fromP.distanceTo(camera.position) * .12); camera.quaternion.copy(q.copy(fromQ).slerp(camera.quaternion, e)); if (k === 'bee') camera.near = lerp(.5, .004, sm(.7, 1, blend)); }
     if (performance.now() - hudAt > 250) { hudAt = performance.now(); label(extra); }
+    shadows(camera, k === 'bee' ? 2 : k === 'hike' || Math.hypot(camera.position.x - 14, camera.position.z + 100) > 300 ? 1 : 0);
   };
   addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; const cam = G.camera; if (!cam) return;
     if (e.code === 'Digit1') setMode('fort', cam); else if (e.code === 'Digit2') setMode('bee', cam); else if (e.code === 'Digit3') setMode('hike', cam); else if (e.code === 'Digit0') setMode('auto', cam);

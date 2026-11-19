@@ -68,7 +68,7 @@ const FXKit = (() => {
 
   // ---- the surface library (fragment). Material ids:
   //  0 plain  1 leaf (veins)  2 petal (streaks, nectar guide)  3 grass blade  4 timber  5 insect fuzz  6 fur (tabby)  7 stone  8 florets / pollen
-  //  9 glossy  10 honeycomb  15 cat's eye  17 striped fuzz  19 bark  22 needle-bearing branch (cut out)  23 far conifer  26 fern (cut out)
+  //  9 glossy  10 honeycomb  15 cat's eye  17 striped fuzz  19 bark  22 needle-bearing branch (cut out)  23 conifer bough tier (ragged rim, cut out)  26 fern (cut out)
   const FRAG = /* glsl */`
 varying float vM, vH; varying vec3 vWp, vOp; varying vec2 vFxUv;
 uniform float uGuide, uPupil;
@@ -99,7 +99,9 @@ vec3 fxSurface(vec3 alb){
   else if(m==22){ float u=abs(uv.x-.5)*2., v=uv.y; float tw=abs(fract(v*34.+u*3.2+vOp.y*.7)-.5);
     float a=step(tw,.2+.16*vnoise3(vec3(uv*vec2(9.,70.),vOp.y)))*step(u,1.-.35*v); a*=step(.3,vnoise3(vec3(uv.x*5.,v*4.,vOp.y*3.1))+.25*(1.-u)); a=max(a,step(u,.07));
     if(a<.5) discard; alb*=mix(.5,1.15,u)*(.75+.5*vnoise3(vOp*7.)); fxTrans=.5; fxAO=mix(.4,1.,v); }
-  else if(m==23){ alb*=(.45+.9*vnoise3(vOp*1.3))*mix(.55,1.1,clamp(uv.y,0.,1.)); fxTrans=.3; }
+  else if(m==23){ float v=uv.y, fr=vnoise3(vec3(uv.x*70.,vOp.y*2.,uv.x*17.)), bough=abs(fract(uv.x*9.+vnoise3(vec3(vOp.y*1.7,uv.x*3.,1.))*.35)-.5);
+    if(v>.55+.45*fr||(bough>.4+.08*fr&&v>.3)) discard;
+    alb*=mix(.35,1.2,v)*(.7+.6*vnoise3(vec3(uv.x*40.,v*6.,vOp.y))); fxTrans=.4; fxRough=.8; fxAO=mix(.4,1.,v); }
   else if(m==26){ float u=abs(uv.x-.5)*2.; if(u>.1&&fract(uv.y*15.+u*.8)>.62) discard; alb*=.8+.4*uv.y; fxTrans=.7; fxAO=mix(.5,1.,smoothstep(0.,.3,vH)); }
   return alb*fxAO;
 }`;
