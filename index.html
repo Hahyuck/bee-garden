@@ -403,10 +403,10 @@ function resize() {
   rtDof = new THREE.WebGLRenderTarget(OW, OH, hf);
   rtB1a = new THREE.WebGLRenderTarget(OW >> 2, OH >> 2, hf); rtB1b = rtB1a.clone();
   rtB2a = new THREE.WebGLRenderTarget(OW >> 3, OH >> 3, hf); rtB2b = rtB2a.clone();
-  const asp = OW / OH, k = Math.tan(27 * Math.PI / 180), rc = Math.hypot(1, 1 / asp), Tn = Math.tan(2 * Math.atan(rc * k)) / rc;
+  const asp = OW / OH, k = Math.tan(27 * Math.PI / 180) * Math.min(1, asp), ref = Math.min(OH, OW * 9 / 16) / 1080, rc = Math.hypot(1, 1 / asp), Tn = Math.tan(2 * Math.atan(rc * k)) / rc;
   camera.aspect = asp; camera.fov = 2 * Math.atan(Tn / asp) * 180 / Math.PI; camera.updateProjectionMatrix();
   U.dof.uK.value = k; U.dof.uT.value = Tn; U.dof.uAspect.value = asp; U.dof.uRes.value.set(OW, OH);
-  U.dof.uApK.value = 110 * OH / 1080; U.dof.uMaxC.value = 24 * OH / 1080; U.dof.uStep.value = (QF < .6 ? 7 : 3.4) * OH / 1080;
+  U.dof.uApK.value = 110 * ref; U.dof.uMaxC.value = 24 * ref; U.dof.uStep.value = (QF < .6 ? 7 : 3.4) * ref;
   U.fin.uRes.value.set(OW, OH); U.fin.uAspect.value = asp; ptU.uPx.value = mh;
 }
 addEventListener('resize', resize); resize();
