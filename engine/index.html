@@ -5258,6 +5258,8 @@ const Sky = (() => {
     // the air takes the horizon's colour, and thickens in rain and snow
     const wet = typeof Weather !== 'undefined' ? Math.max(Weather.S.rain, Weather.S.snowing * .8) : 0;
     G.U.uSunDir.value.copy(light); G.U.uSunK.value.set(sun.color.r, sun.color.g, sun.color.b).multiplyScalar(sun.intensity / Math.PI * .5); G.U.uFogCol.value.copy(U.uHor.value).multiplyScalar(.92);
+    // At low solar angles the sky supplies more of the illumination inside long cast shadows.
+    sun.shadow.intensity = sunI > moonI ? lerp(.49, .83, sm(.06, .52, y)) : 1;
     sun.castShadow = G.look.shadows; G.U.uFogP.value.set(G.look.air ? C.fogDensity * (1 + 7 * wet + 2 * storm) : 0, C.fogFalloff, 0, 1 - storm);
     // mist gathers when the sun is low, after rain and in snow, and the wind clears it
     { const wnd = typeof Weather !== 'undefined' ? Weather.S.speed : 4, m = (.75 * (1 - sm(.04, .3, Math.abs(y))) * sm(-.25, -.02, y) + .5 * wet + .15) * (1 - sm(7, 18, wnd)); G.U.uFogM.value.set(G.look.air ? C.mist * m : 0, C.mistFalloff); }
@@ -5488,17 +5490,25 @@ vec3 fxSurface(vec3 alb){
   function coniferDepth() {
     const depth = new THREE.MeshDepthMaterial({depthPacking: THREE.RGBADepthPacking});
     patch(depth, s => {
-      s.vHead('attribute float aM; varying float treePart; varying vec2 treeUV; varying vec3 treeLocal;\n'+GLSL_WIND);
+      s.vHead('attribute float aM; uniform vec3 uSunDir; varying float treePart; varying vec2 treeUV, crownRay; varying vec3 treeLocal;\n'+GLSL_WIND);
       s.v('#include <begin_vertex>', `#include <begin_vertex>
-        treePart=aM; treeUV=uv; treeLocal=position;
+        treePart=aM; treeUV=uv; treeLocal=position; crownRay=vec2(0.);
         #ifdef USE_INSTANCING
           mat4 objectToWorld=modelMatrix*instanceMatrix;
           float height=max(0.,(objectToWorld*vec4(position,1.)).y-objectToWorld[3].y);
           mat3 rot=mat3(objectToWorld);
           transformed+=(clWind(objectToWorld[3].xyz,.02*height*height/(height+10.))*rot)/dot(rot[0],rot[0]);
+          // A sun ray keeps the same opening through overlapping foliage shells.
+          // Anchor the pattern at the tree, independent of the camera and shadow-map texels.
+          vec3 rel=rot*transformed;
+          vec3 side=normalize(vec3(uSunDir.z,0.,-uSunDir.x));
+          crownRay=vec2(dot(rel,side),dot(rel,cross(uSunDir,side)))+objectToWorld[3].xz;
         #endif`);
-      s.fHead(GLSL_NOISE+coniferMask+'\nvarying float treePart; varying vec2 treeUV; varying vec3 treeLocal;');
-      s.f('#include <alphatest_fragment>','#include <alphatest_fragment>\nif(openNeedles(int(treePart+.5),treeUV,treeLocal)) discard;');
+      s.fHead(GLSL_NOISE+coniferMask+'\nvarying float treePart; varying vec2 treeUV, crownRay; varying vec3 treeLocal;');
+      s.f('#include <alphatest_fragment>',`#include <alphatest_fragment>
+        int part=int(treePart+.5);
+        if(openNeedles(part,treeUV,treeLocal)) discard;
+        if(part==23 && .7*vnoise(crownRay*1.65)+.3*vnoise(crownRay*4.5)>.58) discard;`);
     }, 'conifer-depth');
     return depth;
   }
@@ -5805,7 +5815,7 @@ const Weather = (() => {
       'uniform float uLum; varying float vA; void main(){ float a = smoothstep(.5, .15, length(gl_PointCoord - .5)) * vA; if (a < .01) discard; gl_FragColor = vec4(vec3(.82, .86, .92) * uLum, a * .85); }');
     [drops, DU] = cloud(scene, C.drops, C.dropBox, head + 'vec3 p = s * uBox + uDrift * (.85 + .3 * fract(s.z * 13.));' + wrap + 'gl_PointSize = min(uPx * .5 / max(d, .4), 46.); }',
       'uniform float uLum; varying float vA; void main(){ vec2 c = gl_PointCoord - .5; float a = smoothstep(.03, 0., abs(c.x + c.y * .12)) * smoothstep(.5, .3, abs(c.y)) * vA; if (a < .01) discard; gl_FragColor = vec4(vec3(.7, .76, .84) * uLum, a * .32); }');
-    chip = document.createElement('div'); chip.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);font:600 12px/1.4 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;text-shadow:0 1px 8px rgba(0,0,0,.85);z-index:5;pointer-events:none;white-space:pre;font-variant-numeric:tabular-nums;opacity:.9'; document.body.appendChild(chip);
+    chip = document.createElement('div'); chip.id='world-weather'; chip.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);font:600 12px/1.4 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;text-shadow:0 1px 8px rgba(0,0,0,.85);z-index:5;pointer-events:none;white-space:pre;font-variant-numeric:tabular-nums;opacity:.9'; document.body.appendChild(chip);
     G.tick.push(tick); }
 
   function tick(t, dt) { dt = Math.min(dt || 0, .1); const cold = S.mode === 'snow' || S.mode === 'frost', ease = (k, to, s) => { S[k] += (to - S[k]) * (1 - Math.exp(-dt / s)); };
@@ -5937,6 +5947,7 @@ vec3 poolLight(vec3 lit, vec3 viewNormal, vec3 wp, float footprint){
   return mix(lit,sky,water*fresnel*grazing);
 }`;
   function waterLighting(s, wp) {
+    CarGroundShade.bind(s,wp);
     s.sh.uniforms.uStandingWater = wetState;
     Object.assign(s.sh.uniforms, Sky.U);
     s.f('#include <emissivemap_fragment>', `float wetFoot=max(length(dFdx(${wp}.xz)),length(dFdy(${wp}.xz)));
@@ -6585,6 +6596,37 @@ vec3 lfLight(vec3 irr, vec3 wp){
 
 // ===== 79_contact.js =====
 
+// Local occlusion on the road follows the rendered tyres, including in the rear-view camera.
+const CarGroundShade=(()=>{
+  const tyres=Array.from({length:4},()=>new THREE.Vector3());
+  const centre=new THREE.Vector3(),heading=new THREE.Vector2(0,1);
+  let visible=false;
+  const active={get value(){return visible&&G.look.contact;}};
+  function bind(s,worldPosition){
+    Object.assign(s.sh.uniforms,{uCarShadeOn:active,uCarCentre:{value:centre},uCarHeading:{value:heading},uCarTyres:{value:tyres}});
+    s.fHead(`uniform bool uCarShadeOn; uniform vec3 uCarCentre,uCarTyres[4]; uniform vec2 uCarHeading;
+      float carGroundLight(vec3 p){
+        vec2 delta=p.xz-uCarCentre.xz;
+        if(!uCarShadeOn || dot(delta,delta)>6.25)return 1.;
+        vec2 side=vec2(uCarHeading.y,-uCarHeading.x);
+        vec2 local=abs(vec2(dot(delta,side),dot(delta,uCarHeading)));
+        float belly=(1.-smoothstep(.54,1.04,local.x))*(1.-smoothstep(1.27,2.03,local.y));
+        belly*=1.-smoothstep(.65,1.18,abs(p.y-uCarCentre.y));
+        float tyreShade=0.;
+        for(int i=0;i<4;i++){
+          vec2 offset=p.xz-uCarTyres[i].xz;
+          vec2 uv=vec2(dot(offset,side)/.25,dot(offset,uCarHeading)/.38);
+          float close=1.-smoothstep(.025,.29,abs(uCarTyres[i].y-p.y));
+          tyreShade=max(tyreShade,close*(1.-smoothstep(.16,1.,dot(uv,uv))));
+        }
+        return (1.-.52*belly)*(1.-.73*tyreShade);
+      }`);
+    s.f('#include <aomap_fragment>',`#include <aomap_fragment>
+      float groundLight=carGroundLight(${worldPosition});
+      reflectedLight.indirectDiffuse*=groundLight;reflectedLight.indirectSpecular*=groundLight;`);
+  }
+  return {tyres,bind,setPose(position,forward){visible=true;centre.copy(position);heading.set(forward.x,forward.z).normalize();},hide(){visible=false;}};
+})();
 // Short-range ambient occlusion, evaluated in camera space before focus, bloom and film.
 const GLSL_CONTACT = /* glsl */`
 varying vec2 vUv;
@@ -7055,8 +7097,8 @@ const VisualStyle=(()=>{
   let yaw=0, pitch=0,zoom=1,pointer=null,px=0,py=0;
   const orbitOffset=new THREE.Vector3(),canvas=document.getElementById('c');
   function subject(){
-    if(ActorWalk.thirdPerson && !(Modes.cur==='drive'&&DriveRace.phase==='boarding'))return ActorWalk.position;
-    if(Modes.cur==='drive'&&Drive.on&&!Drive.cockpit)return Drive.car.p;
+    if(ActorWalk.thirdPerson)return ActorWalk.position;
+    if(Modes.cur==='drive'&&(Drive.on||DriveRace.phase==='grid')&&!Drive.cockpit)return Drive.car.p;
     if(Modes.cur==='boat')return Marine.position;
     return null;
   }
@@ -7083,6 +7125,7 @@ const VisualStyle=(()=>{
     zoom=clamp(zoom*Math.exp(-clamp(e.deltaY*unit,-800,800)*.00155),.55,3.5);
   },{passive:false});
   function frame(camera){
+    if(Modes.cur==='drive'&&DriveRace.phase==='opening')return;
     const offset=fixedView();if(!offset)return;
     const point=subject();
     if(!point){
@@ -7323,6 +7366,18 @@ const Phys = (() => {
     const b = world.createRigidBody(bd); world.createCollider(K.col(R.ColliderDesc).setDensity(K.rho).setFriction(K.fr).setRestitution(K.re), b);
     const e = { b, kind, i: K.used++, vol: K.vol, r: K.r, area: K.area, on: true, wet: 0 }; K.im.count = K.used; K.im.setColorAt(e.i, _c.set(o.color === undefined ? K.tint : o.color)); if (K.im.instanceColor) K.im.instanceColor.needsUpdate = true;
     bodies.push(e); show(e); return e; }
+  function remove(e) {
+    const index=bodies.indexOf(e);
+    if(index<0||!e.kind)return;
+    const k=KIND[e.kind],last=k.used-1;
+    if(e.i!==last){
+      const moved=bodies.find(other=>other.kind===e.kind&&other.i===last);
+      k.im.getMatrixAt(last,_m);k.im.setMatrixAt(e.i,_m);
+      k.im.getColorAt(last,_c);k.im.setColorAt(e.i,_c);moved.i=e.i;
+      k.im.instanceMatrix.needsUpdate=true;k.im.instanceColor.needsUpdate=true;
+    }
+    k.im.count=--k.used;bodies.splice(index,1);world.removeRigidBody(e.b);
+  }
   // a body another module made and draws itself (the car): it gets the sea, the wind and the blasts like everything else
   function adopt(b, o) { const e = { b, kind: null, vol: o.vol, r: o.r, area: o.area || 0, on: true, manual: true, wet: 0, lift: o.lift || null }; bodies.push(e); return e; }
   function show(e) { const K = KIND[e.kind], t = e.b.translation(), q = e.b.rotation(); _m.compose(_p.set(t.x, t.y, t.z), _q.set(q.x, q.y, q.z, q.w), _s.set(1, 1, 1)); K.im.setMatrixAt(e.i, _m); K.im.instanceMatrix.needsUpdate = true; }
@@ -7440,7 +7495,7 @@ const Phys = (() => {
     else if (c === 'KeyG') { const x = a.o.x + a.d.x * 9, z = a.o.z + a.d.z * 9; prime(x, z, 0); spawn('crate', x, Math.max(Island.surf(x, z)[0], SEA) + 2.2, z, { color: pick([0xd9c592, 0xcdb37a, 0xe6d6a6]) }); }
     else { const h = ray(a.o, a.d, 160); if (h) blast(h.x, h.y + .3, h.z); else blast(a.o.x + a.d.x * 20, a.o.y + a.d.y * 20, a.o.z + a.d.z * 20); } });
 
-  return { init, step, spawn, adopt, blast, ray, prime, thump, pre, KIND, bodies, wind, H, SEA,
+  return { init, step, spawn, remove, adopt, blast, ray, prime, thump, pre, KIND, bodies, wind, H, SEA,
     box,meshSolid,castBox,castPlayer,headroom,setPlayer,stopPlayer,setCompanion,
     get ready() { return ready; }, get R() { return R; }, get world() { return world; }, get hold() { return hold; }, set hold(v) { hold = v; },
     get stats() { return { bodies: bodies.length, awake: bodies.filter(e => e.on && !e.b.isSleeping()).length, tiles: tiles.size, cells: [...cells.values()].filter(c => c.cols).length, steps, stepMs: +stepMs.toFixed(2) }; } };
@@ -7478,7 +7533,7 @@ const Sound = (() => {
 const Drive = (() => {
   const RD = Island.RD, V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), YAX = V(0, 1, 0);
   const CC = CFG.car, COMY = CC.comY, M = CC.mass, IX = CC.inertia[0], IY = CC.inertia[1], IZ = CC.inertia[2], RAD = CC.wheelRadius, REST = CC.springRest, TRAV = CC.springTravel, KS = CC.spring, CS = CC.damper, G9 = 9.81;
-  const WL = [[.74, -.18, 1.22], [-.74, -.18, 1.22], [.74, -.18, -1.18], [-.74, -.18, -1.18]].map(a => V(...a));      // +X is the car's left, +Z its nose
+  const WL = [[.74, -.08, 1.22], [-.74, -.08, 1.22], [.74, -.08, -1.18], [-.74, -.08, -1.18]].map(a => V(...a));      // +X is the car's left, +Z its nose
   const MU = CC.grip, RR = CC.rolling, GEAR = CC.gears, FINAL = CC.finalDrive, REV = CC.reverse; let snowK = 0, iceK = 0;
   const car = { p: V(), q: new THREE.Quaternion(), v: V(), w: V(), comp: [0, 0, 0, 0], len: [.2, .2, .2, .2], spin: [0, 0, 0, 0], steer: 0, gear: 1, rpm: 900, slip: 0, thr: 0, air: 0, surf: 0, bad: 0 };
   const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
@@ -7490,7 +7545,18 @@ const Drive = (() => {
   let body = null, hitT = 0; const tr0 = [V(), V()], tr1 = V(); let trOn = [false, false]; const vPrev = V(), cm = V(), _i = { x: 0, y: 0, z: 0 };
   let grp = null, wheels = [], on = false, paused = false, camMode = 0, hud, menu, lastI = 0, camInit = false, snd = null, drive = 0, brake = 0, shiftT = 0, wet = 0, pad = [false, false, false];
   function reset(i) { const n = RD.n; i = ((i % n) + n) % n; const j = (i + 1) % n;
-    car.p.set(RD.px[i], Island.support(RD.px[i],RD.pz[i]) + .69, RD.pz[i]); car.q.setFromAxisAngle(YAX, Math.atan2(RD.px[j] - RD.px[i], RD.pz[j] - RD.pz[i])); car.v.set(0, 0, 0); car.w.set(0, 0, 0); car.comp.fill(.09); car.gear = 1; car.rpm = 900; car.bad = 0; car.steer = 0; car.slip = 0; shiftT = 0; camInit = false; lastI = i; vPrev.set(0, 0, 0);
+    car.p.set(RD.px[i], 0, RD.pz[i]);
+    bz.set(RD.px[j]-car.p.x,0,RD.pz[j]-car.p.z).normalize();bx.crossVectors(YAX,bz);
+    const floor=WL.map(w=>Island.support(car.p.x+bx.x*w.x+bz.x*w.z,car.p.z+bx.z*w.x+bz.z*w.z));
+    const across=(floor[0]+floor[2]-floor[1]-floor[3])/(2*(WL[0].x-WL[1].x));
+    const along=(floor[0]+floor[1]-floor[2]-floor[3])/(2*(WL[0].z-WL[2].z));
+    bx.y=across;bz.y=along;bz.normalize();by.crossVectors(bz,bx).normalize();bx.crossVectors(by,bz).normalize();
+    car.q.setFromRotationMatrix(mm.makeBasis(bx,by,bz));
+    const preload=M*G9*by.y/(4*KS);
+    car.p.y=floor.reduce((sum,y)=>sum+y,0)/4-along*(WL[0].z+WL[2].z)/2+(RAD+REST-preload-WL[0].y)/by.y;
+    sampleGround();
+    for(let k=0;k<4;k++){const len=wheelLength(k);car.comp[k]=Math.max(0,REST-len);}
+    car.v.set(0, 0, 0); car.w.set(0, 0, 0); car.gear = 1; car.rpm = 900; car.bad = 0; car.steer = 0; car.slip = 0; shiftT = 0; camInit = false; lastI = i; vPrev.set(0, 0, 0);
     if (body) { Phys.prime(car.p.x, car.p.z); body.setTranslation(car.p, true); body.setRotation(car.q, true); body.setLinvel({ x: 0, y: 0, z: 0 }, true); body.setAngvel({ x: 0, y: 0, z: 0 }, true); } }
   const pull = () => { const t = body.translation(), q = body.rotation(), v = body.linvel(), w = body.angvel(); car.p.set(t.x, t.y, t.z); car.q.set(q.x, q.y, q.z, q.w); car.v.set(v.x, v.y, v.z); car.w.set(w.x, w.y, w.z); };
   // the car as a body in the world's physics: mass, a low centre of mass, inertia, and a hull that can hit things. The wheels stay ours:
@@ -7549,6 +7615,7 @@ const Drive = (() => {
       bxm(.32,.105,.05,side*.56,-.025,1.974,lamp);
     }
     bxm(.46,.135,.03,0,-.11,-1.977,wax);
+    ext([[-1.94,-.31],[-1.88,-.43],[-1.64,-.44],[-1.50,-.34]],1.49,trim,.025);
     bxm(.78,.14,.045,0,-.12,1.98,trim);
     bxm(1.36,.055,.18,0,.75,-1.31,paint);
     bxm(1.66, .16, .14, 0, -.31, 1.9, trim); bxm(1.66, .16, .14, 0, -.31, -1.9, trim); bxm(.7, .1, .04, 0, -.14, 1.925, trim);
@@ -7594,10 +7661,38 @@ const Drive = (() => {
     car.v.x*=topSpeed/speed; car.v.z*=topSpeed/speed;
     if(body)body.setLinvel(car.v,true);
   }
+  function sampleGround(){
+    for(let i=0;i<4;i++){
+      A.copy(WL[i]).applyQuaternion(car.q).add(car.p);
+      const g=gnd[i],[y,type]=Island.surf(A.x,A.z);
+      g[0]=y;g[1]=(Island.support(A.x+.4,A.z)-y)/.4;g[2]=(Island.support(A.x,A.z+.4)-y)/.4;
+      g[3]=A.x;g[4]=A.z;g[5]=type;if(i===0)car.surf=type;
+    }
+  }
+  function wheelLength(i){
+    const g=gnd[i];A.copy(WL[i]).applyQuaternion(car.q).add(car.p);
+    const floor=g[0]+g[1]*(A.x-g[3])+g[2]*(A.z-g[4]);
+    const slope=by.y-g[1]*by.x-g[2]*by.z;
+    const len=(A.y-floor-RAD*Math.hypot(1,g[1],g[2]))/Math.max(.35,slope);
+    car.len[i]=clamp(len,REST-TRAV-.04,REST+.06);
+    return len;
+  }
+  function drawCar(){
+    grp.position.copy(car.p);grp.quaternion.copy(car.q);
+    by.set(0,1,0).applyQuaternion(car.q);
+    for(let i=0;i<4;i++){
+      wheelLength(i);
+      const w=wheels[i];w.position.copy(WL[i]);w.position.y-=car.len[i];
+      w.rotation.set(car.spin[i],i<2?car.steer:0,0);
+      const contact=CarGroundShade.tyres[i];
+      contact.copy(w.position).applyQuaternion(car.q).add(car.p);contact.y-=RAD;
+    }
+    bz.set(0,0,1).applyQuaternion(car.q);
+    CarGroundShade.setPose(car.p,bz);
+  }
   function sub(h) {
     if (body) pull(); const q = car.q; bx.set(1, 0, 0).applyQuaternion(q); by.set(0, 1, 0).applyQuaternion(q); bz.set(0, 0, 1).applyQuaternion(q); F.set(0, body ? 0 : -M * G9, 0); cm.copy(car.p).addScaledVector(by, body ? COMY : 0); Tq.set(0, 0, 0); let slip = 0, air = 0;
-    for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z);
-      const gy = g[0] + g[1] * (A.x - g[3]) + g[2] * (A.z - g[4]), len = (A.y - gy - RAD) / Math.max(by.y, .35); car.len[i] = clamp(len, REST - TRAV - .04, REST + .06);
+    for (let i = 0; i < 4; i++) { const g = gnd[i], len=wheelLength(i);
       if (len > REST) { car.comp[i] = 0; air++; continue; }
       const c = Math.min(REST - len, TRAV + .08); let Fz = KS * c + CS * (c - car.comp[i]) / h; if (c > TRAV) Fz += 90000 * (c - TRAV); car.comp[i] = c; if (Fz <= 0) continue; Fz = Math.min(Fz, 4 * M * G9);
       nrm.set(-g[1], 1, -g[2]).normalize(); C.copy(A).addScaledVector(by, -(len + RAD)); r.subVectors(C, cm); vC.copy(car.w).cross(r).add(car.v);
@@ -7636,14 +7731,13 @@ const Drive = (() => {
     if (!grp) return ''; readInput();
     if (!paused) { const te = G.tEnv === undefined ? G.t : G.tEnv; wet = sm(31.2, 36, te) * (1 - sm(68, 76, te)); if (typeof Weather !== 'undefined') { wet = Weather.S.wet; snowK = Weather.S.cover; iceK = Weather.S.ice; }
       if (body) { pull(); limitSpeed(); } bx.set(1, 0, 0).applyQuaternion(car.q); by.set(0, 1, 0).applyQuaternion(car.q); bz.set(0, 0, 1).applyQuaternion(car.q); control(dt);
-      for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z); const s0 = Island.surf(A.x, A.z), y0 = s0[0], ty = s0[1];
-        g[0] = y0; g[1] = (Island.surf(A.x + .4, A.z)[0] - y0) / .4; g[2] = (Island.surf(A.x, A.z + .4)[0] - y0) / .4; g[3] = A.x; g[4] = A.z; g[5] = ty; if (i === 0) car.surf = ty; }
+      sampleGround();
       if (!body && dt > 0) { const n = clamp(Math.ceil(dt * 240), 1, 12), h = dt / n; for (let i = 0; i < n; i++) sub(h); }
       const road = Island.nearRoad(car.p.x, car.p.z); car.off = road.d; if(road.d < 60) lastI = road.i;
       if (body) { hitT -= dt; const dv = tmp.copy(car.v).sub(vPrev).length(); vPrev.copy(car.v); if (dv > 2.2 && hitT <= 0) { Phys.thump(Math.min(1, dv / 9)); hitT = .22; } }      // a jolt in the velocity is a hit: let it be heard
       const sunk = car.p.y < .6 && Island.surf(car.p.x, car.p.z)[0] < -.6; car.bad = by.y < .3 || (!body && car.p.y < -1.2) ? car.bad + dt : sunk ? car.bad + dt * .4 : 0; if (car.bad > 1.6 || !isFinite(car.p.x) || car.p.y < -6) back(); }
     brakeLight.emissiveIntensity=inp.brk || inp.hb ? 3.2 : .64;
-    grp.position.copy(car.p); grp.quaternion.copy(car.q); wheels.forEach((w, i) => { w.position.set(WL[i].x, WL[i].y - car.len[i], WL[i].z); w.rotation.set(car.spin[i], i < 2 ? car.steer : 0, 0); });
+    drawCar();
     if (typeof FX !== 'undefined' && !paused) for (let k = 0; k < 2; k++) { const i = k + 2, sv = car.v.length(), loose = car.surf !== 0 ? 1 : 0, spray = snowK > .25 || wet > .5 ? 1 : 0, slide = car.slip > .45 ? 1 : 0, emit = car.comp[i] > 0 && sv > 4 && (loose || spray || slide);
       tr1.copy(car.p).addScaledVector(bx, WL[i].x).addScaledVector(by, WL[i].y - car.len[i] - RAD + .12).addScaledVector(bz, WL[i].z - .25);
       if (emit && trOn[k] && tr1.distanceToSquared(tr0[k]) > .16) { FX.trail(tr0[k].clone(), tr1.clone(), (.16 + .1 * Math.min(1, sv / 20)) * (spray ? 1.3 : 1), spray || (slide && !loose) ? 1 : 0); tr0[k].copy(tr1); } else if (!trOn[k] || !emit) tr0[k].copy(tr1); trOn[k] = emit; }
@@ -7660,21 +7754,15 @@ const Drive = (() => {
   }
   function enter() { on = true; grp.visible = true; if (body) { body.setEnabled(true); Phys.prime(car.p.x, car.p.z); } hud.style.display = ''; camInit = false; }
   function park() {
-    reset(RD.n-6); grp.visible = true; grp.position.copy(car.p); grp.quaternion.copy(car.q);
-    for (let i=0;i<wheels.length;i++) {
-      const anchor=tmp.copy(WL[i]).applyQuaternion(car.q).add(car.p);
-      car.len[i]=anchor.y-Island.support(anchor.x,anchor.z)-RAD;
-      wheels[i].position.set(WL[i].x,WL[i].y-car.len[i],WL[i].z);
-      wheels[i].rotation.set(0,0,0);
-    }
-    doorHinge.rotation.y=0; car.spin.fill(0); hitT=0; trOn.fill(false); drive=brake=0; pedalWasDown=false; car.drifting=false;
+    reset(RD.n-6); grp.visible = true;car.spin.fill(0);drawCar();
+    doorHinge.rotation.y=0; hitT=0; trOn.fill(false); drive=brake=0; pedalWasDown=false; car.drifting=false;
   }
   function finish() {
     on=false; if(body) body.setEnabled(false);
     hud.style.display='none'; setPaused(false); Modes.keys.clear();
     Object.assign(touch,{acc:0,brk:0,st:0,hb:0}); sound();
   }
-  function leave() { finish(); grp.visible=false; doorHinge.rotation.y=0; }
+  function leave() { finish(); grp.visible=false; CarGroundShade.hide(); doorHinge.rotation.y=0; }
   addEventListener('keydown', e => { if (!on || e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.('input,select,textarea,button,dialog[open]')) return;
     if (e.code === 'KeyC' && !e.repeat) { camMode = (camMode + 1) % 3; camInit = false; } else if (e.code === 'KeyR' && !e.repeat) back(); else if (e.code === 'Escape') setPaused(!paused);
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); });
@@ -7774,10 +7862,10 @@ const Modes = (() => {
     fly.pitch=Math.atan2(Island.surf(tx,tz)[0]+3.1-fly.p.y,Math.hypot(tx-x,tz-z));
   }
   addEventListener('pointerdown', e => { if (e.target.tagName === 'CANVAS') fly.drag = true; }); addEventListener('pointerup', () => { fly.drag = false; });
-  addEventListener('pointermove', e => { if (!fly.drag || cur !== 'free') return; fly.yaw -= e.movementX * .0032; fly.pitch = clamp(fly.pitch - e.movementY * .0032, -1.45, 1.45); });
+  addEventListener('pointermove', e => { if (!fly.drag || (cur !== 'free' && cur !== 'collect')) return; fly.yaw -= e.movementX * .0032; fly.pitch = clamp(fly.pitch - e.movementY * .0032, -1.45, 1.45); });
   let beeT = 0, eyeOn = false;       // B: the compound-eye view, in the bee's mode
   const MODES = {
-    free: { name: '자유', enter() {}, leave() {}, step(camera, dt) { const sp = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? CC.flyFast : CC.flySpeed) * dt, cy = Math.cos(fly.yaw), sy = Math.sin(fly.yaw), f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
+    free: { name: '자유시점', enter() {}, leave() {}, step(camera, dt) { const sp = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? CC.flyFast : CC.flySpeed) * dt, cy = Math.cos(fly.yaw), sy = Math.sin(fly.yaw), f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
       flyDelta.set((-sy*f+cy*s)*Math.cos(fly.pitch),Math.sin(fly.pitch)*f+Number(keys.has('KeyE'))-Number(keys.has('KeyQ')),(-cy*f-sy*s)*Math.cos(fly.pitch)).multiplyScalar(sp);
       if (flyDelta.lengthSq()) {
         const hit=Phys.castBox(fly.p,flyHalf,identity,flyDelta);
@@ -7791,14 +7879,14 @@ const Modes = (() => {
   const picker = document.createElement('select');
   picker.id='mode-picker'; picker.setAttribute('aria-label','플레이 모드');
   picker.style.cssText='position:fixed;right:max(14px,env(safe-area-inset-right));top:100px;z-index:6;max-width:148px;height:35px;background:#211e1aee;color:#f3e6d2;border:1px solid #eddbbf55;border-radius:8px;padding:3px 8px;font:600 13px system-ui;cursor:pointer;color-scheme:dark';
-  for (const [id,label] of [['free','1 자유 비행'],['bee','2 벌'],['fps','3 FPS'],['drive','4 레이싱'],['flight','5 경비행'],['boat','6 배'],['sub','7 잠수함'],['fishing','8 낚시'],['actors','V 캐릭터'],['collect','0 통 모으기'],['sample','모델 보기']]) {
+  for (const [id,label] of [['free','1 자유시점'],['bee','2 벌'],['fps','3 FPS'],['drive','4 레이싱'],['flight','5 경비행'],['boat','6 배'],['sub','7 잠수함'],['fishing','8 낚시'],['actors','V 캐릭터'],['collect','0 통+돌 랜덤 낙하'],['sample','모델 보기']]) {
     const opt = new Option(label,id); if (id==='sample') opt.disabled=true; picker.add(opt);
   }
   picker.addEventListener('focus',()=>keys.clear());
   picker.addEventListener('keydown',e=>e.stopPropagation());
   picker.addEventListener('change',()=>{set(picker.value);picker.blur();}); document.body.append(picker);
   const hud = document.createElement('div'); hud.style.cssText = 'position:fixed;left:14px;bottom:14px;font:600 12px/1.5 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f3e6d2;background:rgba(14,12,10,.55);padding:8px 12px;border-radius:10px;border:1px solid rgba(243,217,189,.18);z-index:4;pointer-events:none;white-space:pre'; document.body.appendChild(hud);
-  function set(name,restart=false) { if (name==='hike') name='fps'; if (!MODES[name] || (name === cur&&!restart)) return; keys.clear(); MODES[cur].leave(); if (cur !== 'free' && cur !== 'drive') fly.p.copy(G.camera.position); cur = name; picker.value=cur; MODES[cur].enter(); hudAt = 0; }
+  function set(name,restart=false) { if (name==='hike') name='fps'; if (!MODES[name] || (name === cur&&!restart)) return; keys.clear(); MODES[cur].leave(); if (cur !== 'free' && cur !== 'drive') fly.p.copy(G.camera.position); cur = name; picker.value=cur; picker.dispatchEvent(new Event('modechange')); MODES[cur].enter(); hudAt = 0; }
   // the shadow map: a box around the lens, snapped to its own texels so it does not swim; small for the bee, wide from the air
   const SHP = [[310, 520, 20, 1100, -.00035, .22], [75, 260, 1, 520, -.00008, .07], [7, 40, 1, 80, -.00004, .0025], [24, 100, 1, 205, -.000035, .009]], SR = new THREE.Vector3(), SU = new THREE.Vector3(); let shMode = -1;
   function shadows(camera) {
@@ -7810,7 +7898,7 @@ const Modes = (() => {
     sun.target.position.copy(c); sun.position.copy(c).addScaledVector(S, p[1]); sun.target.updateMatrixWorld(); sun.updateMatrixWorld(); }
   // add(id, mode, keyCode, keyLabel): a module brings its own mode, e.g. Modes.add('collect', {...}, 'Digit0', '0')
   const extra = {}; function add(id, mode, code, label) { MODES[id] = mode; if (code) { extra[code] = id; mode.key = label || code; } }
-  function step(camera, dt) { if (!booted) { booted = true; const requested = Q.get('mode'), want = requested==='hike' ? 'fps' : requested; if (MODES[want]) cur = want; picker.value=cur; MODES[cur].enter(); if (cur==='free') visitOutcrop(); }
+  function step(camera, dt) { if (!booted) { booted = true; const requested = Q.get('mode'), want = requested==='hike' ? 'fps' : requested; if (MODES[want]) cur = want; picker.value=cur; picker.dispatchEvent(new Event('modechange')); MODES[cur].enter(); if (cur==='free') visitOutcrop(); }
     camera.near = .3; Post.lens.aperture = 0; Post.lens.focus = 10; Post.lens.fisheye = false; if (cur !== 'bee') Post.lens.eye = 0; let line;
     const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); camera.fov = fix[6] || CC.fov; camera.near = fix[7] || .3; line = ''; }
     else line = MODES[cur].step(camera, dt);
@@ -8116,17 +8204,15 @@ function makeBoatWake(world){
 // ===== 89_driving_mode.js =====
 
 const DriveRace = (() => {
-  const rd = Island.RD, car = Drive.car, up = new THREE.Vector3(0,1,0);
-  const spawn = new THREE.Vector3(), door = new THREE.Vector3(), seat = new THREE.Vector3();
-  const from = new THREE.Vector3(), toward = new THREE.Vector3(), eye = new THREE.Vector3();
-  const entryEye = new THREE.Vector3(), entryLook = new THREE.Vector3(), entryFocus = new THREE.Vector3();
+  const rd = Island.RD, car = Drive.car;
+  const spawn = new THREE.Vector3(), door = new THREE.Vector3();
+  const toward = new THREE.Vector3(), eye = new THREE.Vector3();
   const mirrorCam = new THREE.PerspectiveCamera(56, 3.25, .2, 4200);
   const view = new THREE.Vector4(), scissor = new THREE.Vector4();
   let mirrorTarget, mirrorColor, mirrorScene, mirrorQuad, mirrorTone, mirrorFilter, mirrorClock = 1;
   let phase = 'none', t = 0, elapsed = 0, best = 0, nextGate = 0, previousIndex = 0;
-  let handoffYaw = 0, arch = null, promptDistance = Infinity, messageAt = -1;
+  let arch = null, promptDistance = Infinity, messageAt = -1;
   let releaseParked = null, releaseGate = [];
-  let doorOpen=false, doorAngle=0, boardingStart=0, releaseDoor=null, colliderAngle=-1;
   try { best = Math.max(0, Number(localStorage.getItem('garden.coast-time-trial')) || 0); } catch {}
   const touch = matchMedia('(any-pointer: coarse)');
   const ui = document.createElement('div');
@@ -8135,7 +8221,6 @@ const DriveRace = (() => {
     <div id="race-rear-mirror" aria-label="후방 거울"></div>
     <div id="race-time" role="timer"></div>
     <button type="button" id="race-board"></button>
-    <button type="button" id="race-door" hidden>문 열기 (O)</button>
     <div id="race-result" role="status"></div>
     <div id="race-touch" aria-label="운전 조작">
       <div><button type="button" data-pedal="left" aria-label="좌회전">◀</button><button type="button" data-pedal="right" aria-label="우회전">▶</button></div>
@@ -8152,8 +8237,6 @@ const DriveRace = (() => {
     #drive-race #race-board {background:#edc476;color:#272011;border:0;white-space:nowrap;padding:9px 16px}
     #drive-race #race-board:disabled {background:#181d19df;color:#fff3dd;cursor:default}
     #race-result {bottom:48%;background:#171d1ceb;padding:10px 15px;border-radius:8px;font-size:17px}
-    #race-door {position:fixed;left:50%;bottom:calc(18% + 49px);transform:translateX(-50%);z-index:6}
-    @media(max-width:540px){#race-door{bottom:calc(25% + 49px)}}
     #race-touch {position:fixed;inset:auto 14px calc(75px + env(safe-area-inset-bottom)) 14px;z-index:5;display:flex;justify-content:space-between;align-items:flex-end;pointer-events:none}
     #race-touch div {display:flex;gap:4px}
     #race-touch button {pointer-events:auto;min-width:44px}
@@ -8166,22 +8249,6 @@ const DriveRace = (() => {
   const mirror = ui.querySelector('#race-rear-mirror'), timing = ui.querySelector('#race-time');
   const board = ui.querySelector('#race-board'), message = ui.querySelector('#race-result'), pads = ui.querySelector('#race-touch');
   const held = new Map();
-  const doorButton=ui.querySelector('#race-door');
-  function toggleDoor() {
-    if(phase==='approach' && promptDistance<=1.5)doorOpen=!doorOpen;
-  }
-  doorButton.addEventListener('click',()=>{toggleDoor();doorButton.blur();});
-  function updateDoor(open) {
-    doorAngle=open;Drive.setDoor(open);
-    if(Math.abs(colliderAngle-open)<.07 && open>0 && open<1)return;
-    if(colliderAngle===open)return;
-    releaseDoor?.();releaseDoor=null;colliderAngle=open;
-    if(phase==='approach' && open>.04){
-      const a=1.39*open;
-      const center=vehiclePoint(eye,.815+.47*Math.sin(a),.22,.57-.47*Math.cos(a));
-      releaseDoor=Phys.box(center,new THREE.Vector3(.09,.86,.95),carYaw()-a);
-    }
-  }
   function readPedals() {
     const down = key => [...held.values()].includes(key);
     Object.assign(Drive.touch, {acc:+down('acc'), brk:+down('brk'), hb:+down('hb'), st:+down('left')-Number(down('right'))});
@@ -8205,7 +8272,6 @@ const DriveRace = (() => {
     ui.hidden = phase === 'none'; mirror.hidden = !inCar; timing.hidden = !racing;
     pads.hidden = !(inCar && (navigator.maxTouchPoints || touch.matches));
     board.hidden = phase !== 'approach' && phase !== 'finished';
-    doorButton.hidden = phase!=='approach' || promptDistance>1.5;
     message.hidden = !(phase === 'finished' || phase === 'grid');
   }
   touch.addEventListener('change',visibility);
@@ -8228,7 +8294,6 @@ const DriveRace = (() => {
     if(arch) arch.visible=false;
   }
   function unpark() {
-    releaseDoor?.();releaseDoor=null;colliderAngle=-1;
     if(releaseParked) releaseParked();
     releaseParked=null;
   }
@@ -8245,7 +8310,6 @@ const DriveRace = (() => {
     }
   }
   function startApproach() {
-    doorOpen=false;doorAngle=0;
     Drive.park(); G.drive=false;
     unpark();
     if(Phys.ready) {
@@ -8262,47 +8326,17 @@ const DriveRace = (() => {
   function boardCar() {
     if (phase === 'finished') { Drive.leave(); startApproach(); return; }
     if (phase !== 'approach' || promptDistance > 1.5 || !ActorWalk.avatar) return;
-    from.copy(ActorWalk.position);
-    const actor=ActorWalk.avatar; handoffYaw=actor.rotation.y;
-    entryEye.copy(G.camera.position);G.camera.getWorldDirection(entryLook).multiplyScalar(entryEye.distanceTo(from)).add(entryEye);
-    boardingStart=doorAngle;releaseDoor?.();releaseDoor=null;
-    phase='boarding';t=0;WalkActions.setCrouch(true);Modes.keys.clear();
+    ActorWalk.endApproach();Modes.keys.clear();
+    phase='opening';t=0;
     visibility();
   }
   board.addEventListener('click',()=>{boardCar();board.blur();});
   addEventListener('keydown',e=>{
-    if(e.code==='KeyO'&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey)toggleDoor();
-    if(e.code==='KeyE'&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&phase==='approach') {e.preventDefault();boardCar();}
+    if(phase==='approach' && (e.code==='KeyO'||e.code==='KeyE') && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.closest?.('input,select,textarea,dialog[open]')){e.preventDefault();boardCar();}
   });
   function chase(camera) {
     vehiclePoint(eye,0,2.3,-6.6);vehiclePoint(toward,0,.8,1.8);
     camera.position.copy(eye);camera.lookAt(toward);camera.near=.2;camera.fov=60;
-  }
-  function boardStep(camera,dt) {
-    t+=dt;
-    const p=clamp(t/1.05);
-    const actor = ActorWalk.avatar;
-    ActorWalk.stepApproach(camera,dt);
-    vehiclePoint(seat,.38,-.53,0);
-    if(actor) {
-      const u=sm(.13,.78,p);
-      actor.position.lerpVectors(from,seat,u);
-      actor.position.y+=Math.sin(Math.PI*u)*.10;
-      const carFacing = carYaw()+Math.PI;
-      const delta=carFacing-handoffYaw;
-      actor.rotation.y=handoffYaw+u*Math.atan2(Math.sin(delta),Math.cos(delta));
-      actor.rotation.z=.16*Math.sin(Math.PI*u);
-      if(p>=.78) actor.visible=false;
-    }
-    vehiclePoint(entryFocus,.4,.35,0);toward.lerpVectors(entryLook,entryFocus,sm(0,1,p));
-    camera.position.copy(entryEye);camera.lookAt(toward);
-    updateDoor(lerp(boardingStart,1,sm(0,.27,p))*(1-sm(.70,1,p)));
-    if(p>=1) {
-      if(actor){ actor.visible=true;actor.rotation.z=0; }
-      ActorWalk.endApproach();phase='grid';t=0;placeGate();visibility();
-      message.textContent='3';chase(camera);
-    }
-    return '운전석 탑승';
   }
   function carYaw() {
     toward.set(0,0,1).applyQuaternion(car.q);return Math.atan2(toward.x,toward.z);
@@ -8335,18 +8369,17 @@ const DriveRace = (() => {
     if(phase==='approach') {
       ActorWalk.stepApproach(camera,dt);
       const p=ActorWalk.position; promptDistance=Math.hypot(p.x-door.x,p.z-door.z);
-      const delta=clamp(Number(doorOpen)-doorAngle,-2.7*dt,2.7*dt);
-      updateDoor(doorAngle+delta);
-      doorButton.hidden=promptDistance>1.5;
-      doorButton.textContent=doorOpen?'문 닫기 (O)':'문 열기 (O)';
-      doorButton.setAttribute('aria-pressed',String(doorOpen));
       board.disabled=promptDistance>1.5 || !ActorWalk.avatar;
-      board.textContent=board.disabled ? '운전석까지 '+promptDistance.toFixed(1)+' m' : (navigator.maxTouchPoints?'탑승':'E  탑승');
-      return '운전석 옆에서 탑승';
+      board.textContent=board.disabled ? '운전석까지 '+promptDistance.toFixed(1)+' m' : (navigator.maxTouchPoints?'문 열고 출발 준비':'E / O  문 열고 출발 준비');
+      return '운전석 문으로 이동';
     }
-    if(phase==='boarding') return boardStep(camera,dt);
+    if(phase==='opening'){
+      t+=dt;Drive.setDoor(sm(0,.20,t));
+      if(t>=.20){phase='grid';t=0;placeGate();message.textContent='3';chase(camera);visibility();}
+      return '출발 준비';
+    }
     if(phase==='grid') {
-      t+=dt;chase(camera);message.textContent=String(Math.max(1,3-Math.floor(t)));
+      t+=dt;Drive.setDoor(1-sm(0,.25,t));chase(camera);message.textContent=String(Math.max(1,3-Math.floor(t)));
       if(t>=3){phase='driving';unpark();Drive.enter();G.drive=true;previousIndex=Island.nearRoad(car.p.x,car.p.z).i;visibility();}
       return '해안 순환 · 타임 트라이얼';
     }
@@ -8354,10 +8387,7 @@ const DriveRace = (() => {
     const hint=Drive.step(camera,dt);updateRace(dt);return hint;
   }
   function leave() {
-    if(phase==='approach'||phase==='boarding'){
-      const actor=ActorWalk.avatar; if(actor) {actor.visible=true;actor.rotation.z=0;}
-      ActorWalk.endApproach();
-    }
+    if(phase==='approach')ActorWalk.endApproach();
     Drive.leave();unpark();G.drive=false;clearGate();phase='none';resetPedals();visibility();Modes.fly.p.copy(G.camera.position);
   }
 
@@ -8407,24 +8437,41 @@ const DriveRace = (() => {
 
 // ===== 89_example_collect.js =====
 
-// ---- an example of a game made on the engine, kept small on purpose: "gather the barrels". Press 0.
-//      Ten yellow barrels are set down around you; fly into one to take it; the clock runs for sixty seconds.
-//      It shows the four things a game needs from the engine: a mode of its own, things placed in the physics world,
-//      a rule checked every frame, and a line of readout. Copy this file to start a game of your own. ----
-const Collect = (() => {
-  const N = 10, TIME = 60; let items = [], score = 0, left = 0, best = 0;
-  function enter() { score = 0; left = TIME; const p = Modes.fly.p;
-    for (const e of items) if (!e.got) e.b.setTranslation({ x: 0, y: -100, z: 0 }, true);       // clear what the last round left (far below, the physics puts a body to rest)
-    items = []; for (let i = 0; i < N; i++) { const a = i / N * TAU, r = 14 + 22 * Math.random(), x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
-      Phys.prime(x, z, 0);                                                                       // make the ground solid there before something lands on it
-      const e = Phys.spawn('barrel', x, Math.max(Island.surf(x, z)[0], 0) + 1.5, z, { color: 0xffd040 }); if (e) items.push(e); } }
-  function step(camera, dt) { Modes.MODES.free.step(camera, dt);                                 // move like free flight
-    if (left > 0) { left -= dt; for (const e of items) { if (e.got) continue; const q = e.b.translation();
-        if (camera.position.distanceTo(q) < 2.6) { e.got = true; score++; FX.blast(q.x, q.y, q.z, 3); Phys.thump(.4); e.b.setTranslation({ x: q.x, y: -100, z: q.z }, true); } }
-      if (score === items.length || left <= 0) { best = Math.max(best, score); left = 0; } }
-    return left > 0 ? `통 모으기 ${score} / ${items.length} · 남은 시간 ${left.toFixed(0)}초` : `끝! ${score}개 · 최고 ${best}개 · 0 을 다시 누르면 새 판`; }
-  Modes.add('collect', { name: '통 모으기', enter, leave() {}, step }, 'Digit0', '0');
-  return { get score() { return score; }, get items() { return items; } };
+// Keep the saved mode id so existing projects and links still open slot 0.
+const FallingProps=(()=>{
+  const items=[],limit=24;
+  const direction=new THREE.Vector3();
+  let delay=0,count=0,firstKind='barrel';
+  function enter(){
+    count=0;delay=0;firstKind=Math.random()<.5?'barrel':'stone';
+    const road=Island.RD,fly=Modes.fly;
+    fly.p.set(road.px[0],road.py[0]+2.4,road.pz[0]);
+    fly.yaw=Math.atan2(road.px[0]-road.px[6],road.pz[0]-road.pz[6]);fly.pitch=.04;
+  }
+  function drop(camera){
+    camera.getWorldDirection(direction);const heading=Math.atan2(direction.x,direction.z);
+    const angle=heading+(Math.random()-.5)*.83,distance=6+Math.random()*6;
+    const x=camera.position.x+Math.sin(angle)*distance,z=camera.position.z+Math.cos(angle)*distance;
+    const y=Math.max(Island.support(x,z)+.5,Phys.SEA,camera.position.y)+1.6+Math.random()*2.7;
+    const kind=count===0?firstKind:count===1?(firstKind==='barrel'?'stone':'barrel'):(Math.random()<.5?'barrel':'stone');
+    if(items.length>=limit)Phys.remove(items.shift());
+    Phys.prime(x,z,0);
+    const item=Phys.spawn(kind,x,y,z);
+    if(!item)return;
+    item.b.setAngvel({x:Math.random()*2-1,y:Math.random()*2-1,z:Math.random()*2-1},true);
+    count++;items.push(item);
+  }
+  function step(camera,dt){
+    Modes.MODES.free.step(camera,dt);
+    if(!Phys.ready)return '통+돌 랜덤 낙하 · 물리 엔진을 불러오지 못했습니다';
+    if(!Phys.hold&&dt>0){
+      delay-=dt;if(delay<=0){drop(camera);delay=.5+Math.random()*.9;}
+    }
+    return '통+돌 랜덤 낙하 · '+count+'개 · WASD 이동 · 끌어서 둘러보기';
+  }
+  function leave(){for(const e of items)Phys.remove(e);items.length=0;}
+  Modes.add('collect',{name:'통+돌 랜덤 낙하',enter,step,leave},'Digit0','0');
+  return {get count(){return count;}};
 })();
 
 // ===== 89_fish_schools.js =====
@@ -9343,7 +9390,7 @@ const PulseRange = (() => {
     reloadCell();
   });
   addEventListener('keydown',e=>{
-    if(!active||e.target.closest?.('dialog[open]'))return;
+    if(!active||e.target.closest?.('dialog[open],#world-bar,#game-composer'))return;
     if(e.key==='Escape'||e.code==='Escape'){e.preventDefault();e.stopImmediatePropagation();pause();return;}
     if(paused&&!e.target.closest?.('input,select,textarea,button,[contenteditable="true"]')&&
       /^(Key[WASDCRFGX]|Arrow\w+|Shift(Left|Right)|Space)$/.test(e.code))e.stopImmediatePropagation();
@@ -9869,7 +9916,7 @@ const SampleBrowser = (() => {
       G.scene.add(holder); shown = holder; holder.updateMatrixWorld(true);
       footprint.setFromObject(holder,true); removeSolid = Phys.meshSolid(holder); updateWalkButton();
       target.set(x,y + .5*size.y*scale,z); radius = Math.max(.1, size.length() * scale / 2);
-      status = item.label + ' · 끌어서 회전 · 1 자유 비행';
+      status = item.label + ' · 끌어서 회전 · 1 자유시점';
     } catch (error) {
       if (request === ticket && shown) clearWorld(); else release(scene);
       if (request === ticket) {
@@ -9970,8 +10017,8 @@ const SampleBrowser = (() => {
 const Scenario=(()=>{
   const modes=['free','bee','actors','fps','drive','flight','boat','sub','fishing','collect'];
   const weather=['clear','rain','snow','frost','auto'];
-  const object={fishing:'물고기 잡기',fps:'표적 명중',boat:'부표 통과',drive:'관문 통과',collect:'통 수집'};
-  const max={drive:4,collect:10};
+  const object={fishing:'물고기 잡기',fps:'표적 명중',boat:'부표 통과',drive:'관문 통과',collect:'통·돌 낙하'};
+  const max={drive:4};
   const schema={type:'object',properties:{title:{type:'string'},mode:{type:'string',enum:modes},style:{type:'string',enum:Object.keys(VisualStyle.names)},
     weather:{type:'string',enum:weather},hour:{type:'number',minimum:0,maximum:23.75},target:{type:'integer',minimum:1,maximum:5000}},required:['title','mode','style','weather','hour','target'],additionalProperties:false};
   let config=null,progress=0,previous=0,first=true,done=false;
@@ -9982,7 +10029,7 @@ const Scenario=(()=>{
     return {title:v.title.trim().slice(0,64),mode:v.mode,style:v.style,weather:v.weather,hour:clamp(Number.isFinite(v.hour)?v.hour:G.day,0,23.75),target:Math.min(v.target,max[v.mode]||(object[v.mode]?100:5000))};
   }
   function count(m){switch(m){case 'fishing':return Fishing.catches;case 'boat':return Marine.state.laps*6+Marine.state.leg;
-    case 'fps':return PulseRange.hits;case 'collect':return Collect.score;case 'drive':return DriveRace.completedGates;}}
+    case 'fps':return PulseRange.hits;case 'collect':return FallingProps.count;case 'drive':return DriveRace.completedGates;}}
   function goal(v){return (object[v.mode]||'이동 거리')+' '+v.target+(object[v.mode]?'회':' m');}
   function apply(v,restart=false){
     const valid=validate(v);Modes.set(valid.mode,restart);VisualStyle.select(valid.style);Weather.set(valid.weather);G.day=valid.hour;
@@ -10005,14 +10052,14 @@ const Scenario=(()=>{
   });
   function draft(text,current,edit){
     const mode=[['fishing',/낚|떡밥|fishing/i],['sub',/잠수|산호|잠망|해저|거북|submarine/i],['boat',/항해|부표|보트|항구|boat/i],['drive',/운전|차량|레이싱|경주|드리프트|race/i],
-      ['fps',/사격|표적|조준|fps/i],['flight',/경비행|비행기|이륙|활주로|plane/i],['bee',/꿀벌|꽃가루|벌이|꿀모/i],['collect',/수집|통을|아이템/i],['actors',/캐릭터|등반|벽타|산행|탐험|달리/i]].find(([,r])=>r.test(text))?.[0]||(edit&&modes.includes(current.mode)?current.mode:'actors');
+      ['fps',/사격|표적|조준|fps/i],['flight',/경비행|비행기|이륙|활주로|plane/i],['bee',/꿀벌|꽃가루|벌이|꿀모/i],['collect',/랜덤.{0,4}낙하|낙하|통과?\s*돌|통을|떨어[지뜨]|수집/i],['actors',/캐릭터|등반|벽타|산행|탐험|달리/i]].find(([,r])=>r.test(text))?.[0]||(edit&&modes.includes(current.mode)?current.mode:'actors');
     const style=[['gaussian',/가우시안/],['diorama',/디오라마/],['yeoul-3d',/흑연/],['cradle-3d',/클린\s*픽셀/],['yeoul-2d',/단색\s*도트/],['yeoul-25d',/디더링/],['cradle-25d',/2\.5D|HD-2D/i],['cradle-2d',/2D|클린.?도트/i],['pixel',/픽셀/]].find(([,r])=>r.test(text))?.[0]||(edit?current.style:'native');
     const target=Number(text.match(/(\d+)\s*(?:마리|개|회|미터|m\b)/i)?.[1])||(object[mode]?3:100);
     return validate({title:text.split(/[\r\n]/)[0].slice(0,42),mode,style,weather:/눈|설원/.test(text)?'snow':/비가|폭우|빗|비 오는/.test(text)?'rain':edit&&weather.includes(Weather.S.mode)?Weather.S.mode:'clear',hour:/밤|야간/.test(text)?22:/노을|해질/.test(text)?18:/새벽/.test(text)?6:edit?G.day:14,target});
   }
   async function generate(text,provider,model,edit){
     const current=Studio.manifest(),baseline=draft(text,current,edit);if(provider==='template')return baseline;
-    const system='Design a playable Bee Garden scenario. Return only JSON matching the schema. Use a short title in the language of the user. Target is catch count in fishing, hits in fps, buoys in boat, gates in drive (max 4), barrels in collect (max 10), meters otherwise. Preserve unspecified settings when revising. Style names: '+JSON.stringify(VisualStyle.names)+'. Schema: '+JSON.stringify(schema);
+    const system='Design a playable Bee Garden scenario. Return only JSON matching the schema. Use a short title in the language of the user. Target is catch count in fishing, hits in fps, buoys in boat, gates in drive (max 4), number of falling barrels and stones in collect, meters otherwise. Preserve unspecified settings when revising. Style names: '+JSON.stringify(VisualStyle.names)+'. Schema: '+JSON.stringify(schema);
     const message=JSON.stringify({request:text,operation:edit?'revise':'new',current:{mode:current.mode,style:current.style,weather:Weather.S.mode,hour:G.day,scenario:current.scenario}});
     if(provider==='browser'){
       const lm=globalThis.LanguageModel;if(!lm||await lm.availability()==='unavailable')throw Error('이 브라우저에서 기기 내 AI를 사용할 수 없습니다. 로컬 Ollama 또는 즉시 규칙 초안을 선택하세요.');
@@ -10200,28 +10247,19 @@ const Studio=(()=>{
 // ===== 89_visual_controls.js =====
 
 const VisualControls=(()=>{
-  const panel=document.createElement('dialog');
-  panel.id='game-visual';panel.setAttribute('aria-labelledby','visual-title');
-  panel.innerHTML=`<header><h2 id="visual-title">게임 비주얼</h2><button type="button" aria-label="게임 비주얼 닫기">닫기 ×</button></header>
-    <fieldset><legend>화면 스타일</legend><div class="visual-grid"></div></fieldset>
-    <label hidden>표현 방식<select data-variant></select></label>
-    <label>픽셀 해상도<select data-raster></select></label>
-    <label>픽셀 Fit<select data-pixel-fit><option value="auto">스타일 기본값</option><option value="off">끄기</option><option value="fit">화면 맞춤</option><option value="integer">정수배</option></select></label>`;
-  const css=document.createElement('style');css.textContent=`
-    #game-visual{box-sizing:border-box;inset:max(54px,env(safe-area-inset-top)) 10px auto auto;margin:0;width:min(310px,calc(100vw - 20px));max-height:calc(100dvh - 68px);overflow:auto;color:#ecf3e8;background:#19332e;border:1px solid #789487;border-radius:10px;padding:14px;font:600 14px/1.35 system-ui}
-    #game-visual::backdrop{background:#06191320}#game-visual header,#game-visual>label{display:flex;align-items:center;justify-content:space-between;gap:8px}#game-visual h2{font-size:18px;margin:0}#game-visual fieldset{border:0;padding:0;margin:15px 0 10px}#game-visual legend{font-size:12px;color:#bed0c1;margin-bottom:6px}
-    #game-visual .visual-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}#game-visual label:has(input){position:relative;cursor:pointer}#game-visual input{position:absolute;opacity:0}
-    #game-visual span,#game-visual button,#game-visual select{display:block;background:#29483d;color:inherit;border:1px solid #759483;border-radius:5px;padding:7px 8px;font:inherit;cursor:pointer}
-    #game-visual input:checked+span{background:#d2e8cb;color:#143226;border-color:#e7f9de}#game-visual input:focus-visible+span,#game-visual :is(button,select):focus-visible{outline:2px solid #ffca7c;outline-offset:1px}
-    #game-visual>label{margin-top:7px}#game-visual [hidden]{display:none!important}`;
-  document.head.append(css);document.body.append(panel);
+  const panel=document.createElement('section');
+  panel.id='game-visual';panel.hidden=true;panel.setAttribute('aria-label','게임 비주얼');
+  panel.innerHTML=`<div role="radiogroup" aria-label="화면 스타일" class="visual-grid"></div><div class="visual-options">
+    <label hidden>표현 방식<select data-variant></select></label><label>픽셀 해상도<select data-raster></select></label>
+    <label>픽셀 Fit<select data-pixel-fit><option value="auto">스타일 기본값</option><option value="off">끄기</option><option value="fit">화면 맞춤</option><option value="integer">정수배</option></select></label></div>`;
+  document.body.append(panel);
   const grid=panel.querySelector('.visual-grid'),variant=panel.querySelector('[data-variant]'),raster=panel.querySelector('[data-raster]'),fit=panel.querySelector('[data-pixel-fit]');
   for(const [id,name] of Object.entries(VisualStyle.groups)){
     const label=document.createElement('label'),radio=document.createElement('input'),text=document.createElement('span');
     radio.type='radio';radio.name='world-visual-style';radio.value=id;text.textContent=name;label.append(radio,text);grid.append(label);
   }
   for(const [w,h] of VisualStyle.sizes)raster.add(new Option(w+' × '+h,w));
-  let family='cradle',afterClose=null;
+  let family='cradle';
   function sync(){
     const id=VisualStyle.current,group=Object.keys(VisualStyle.variants).find(k=>Object.hasOwn(VisualStyle.variants[k],id))||id;
     const options=VisualStyle.variants[group];
@@ -10243,10 +10281,7 @@ const VisualControls=(()=>{
     sync();
     if(!Q.get('project'))try{localStorage.setItem('garden.studio.look',JSON.stringify([VisualStyle.current,VisualStyle.raster,PixelFit.choice]));}catch{}
   };
-  for(const name of ['keydown','keyup'])panel.addEventListener(name,e=>e.stopPropagation());
-  panel.querySelector('button').onclick=()=>panel.close();
-  panel.addEventListener('close',()=>{Modes.keys.clear();afterClose?.();afterClose=null;});
-  return {refresh(){if(panel.open)sync();},open(onClose){afterClose=onClose;Modes.keys.clear();sync();if(!panel.open)panel.showModal();grid.querySelector(':checked').focus();}};
+  return {refresh(){if(!panel.hidden)sync();},open(){Workbench.open('visual');}};
 })();
 
 // ===== 89_vr_actors.js =====
@@ -10755,7 +10790,7 @@ const ActorWalk = (() => {
     ['렌즈', 1, async () => Post.build(R)],
     ['비교 패널', 1, async () => LookPanel.build()],
     ['안내', 1, async () => Guide.build()],
-    ['시스템 메뉴',1,async()=>Workbench.build()],
+    ['월드 메뉴',1,async()=>Workbench.build()],
   ];
   const t0 = performance.now(), total = STEPS.reduce((s, x) => s + x[1], 0); let done = 0;
   try { for (const [name, w, fn] of STEPS) { label.textContent = name; await tick(); const ts = performance.now(); await fn(k => { bar.style.width = ((done + w * k) / total * 100).toFixed(1) + '%'; }); done += w; bar.style.width = (done / total * 100).toFixed(1) + '%'; G.info[name] = Math.round(performance.now() - ts); } }
@@ -10795,11 +10830,11 @@ const Guide = (() => {
   const AIM = 'const c = G.camera, d = c.getWorldDirection(new THREE.Vector3());\n';
   const PARTS = [
     { t: '1. 둘러보기', lead: '이 엔진은 세계 하나와, 그 안에 있는 방법(모드) 여러 개로 이뤄져 있습니다. 숫자 키로 모드를 바꾸고, 이 안내는 H로 여닫습니다.', ex: [
-      { t: '모드 바꾸기', d: '1 자유 비행 · 2 벌 · 3 FPS · 4 레이싱 · 5 경비행 · 6 배 · 7 잠수함 · 8 낚시. 화면 왼쪽 위 목록에서도 고를 수 있습니다.', code: "Modes.set('drive');", run: 1 },
+      { t: '모드 바꾸기', d: '1 자유시점 · 2 벌 · 3 FPS · 4 레이싱 · 5 경비행 · 6 배 · 7 잠수함 · 8 낚시 · 0 통+돌 랜덤 낙하. 화면 왼쪽 위 목록에서도 고를 수 있습니다.', code: "Modes.set('drive');", run: 1 },
       { t: '해안 항해', d: 'W/S로 전후진하고 A/D로 조타해 부표를 차례로 지납니다.', code: "Modes.set('boat');", run: 1 },
       { t: '산호초 잠항', d: 'Q 잠항, E 부상, P 잠망경입니다. 잠망경에서 드래그로 둘러보고 Z로 배율을 바꿉니다.', code: "Modes.set('sub');", run: 1 },
-      { t: '내 게임 만들기', d: '상단의 게임 비주얼에서 화면 표현을 고르세요. GLB 파일은 시스템 메뉴의 도구와 설정에서 추가합니다. 만들고 싶은 내용을 적고 제작 프롬프트 복사를 누르면 저장소 링크와 설정을 함께 가져갈 수 있습니다.' },
-      { t: '자유 비행으로 돌아오기', d: 'W A S D 이동, 화면을 끌어서 둘러보기, Q E 높이, Shift 빠르게.', code: "Modes.set('free');", run: 1 },
+      { t: '내 게임 만들기', d: '상단의 게임 비주얼에서 화면 표현을 고르세요. 하단의 제작할 게임에 아이디어를 입력하고, GLB 파일은 상단 도구에서 추가합니다. 만들고 싶은 내용을 적고 제작 프롬프트 복사를 누르면 저장소 링크와 설정을 함께 가져갈 수 있습니다.' },
+      { t: '자유시점으로 돌아오기', d: 'W A S D 이동, 화면을 끌어서 둘러보기, Q E 높이, Shift 빠르게.', code: "Modes.set('free');", run: 1 },
       { t: '정원에서 캐릭터 조작', d: '위쪽 목록에서 사람이나 개구리 Froggy를 고르세요. W + Shift + Space로 달리면서 점프합니다. 높은 벽을 향해 전진하며 점프하면 잡고, 앞뒤로 오르내리거나 점프로 놓을 수 있습니다. WASD로 이동하고 Shift로 달리고 Space로 점프합니다. C를 누르면 앉거나 일어섭니다. 터치 화면에서는 왼쪽 스틱과 오른쪽 동작 버튼을 사용하세요.', code: "Modes.set('actors');", run: 1 },
       { t: '2D와 2.5D 시점', d: '게임 비주얼에서 2D나 2.5D를 선택하세요. 캐릭터 주변을 드래그해 회전하고 마우스 휠로 확대·축소할 수 있습니다. 2D의 클린 도트는 이동할 때 카메라를 픽셀 격자에 맞춥니다.' },
       { t: '해안의 바위와 흙', d: '정원 끝 바위로 돌아갑니다. 가까이 다가가 표면의 갈라진 결을 보고, 위쪽 숲으로 시선을 돌리면 오후 햇빛이 드는 방향을 읽을 수 있습니다.', code: 'Modes.visitOutcrop();\nG.day = 16.15;', run: 1 },
@@ -10836,7 +10871,7 @@ const Guide = (() => {
       { t: '배포용 한 파일 만들기', d: '새 파일을 더했거나 웹에 올릴 때 한 번 돌립니다. index.html이 다시 만들어집니다.', code: 'python tools/build.py' },
     ] },
     { t: '5. 게임 엔진으로 활용하는 방법', lead: '지형, 날씨, 물리, 차량과 카메라를 조합해 장르를 구성합니다. V 모드에서 외부 GLB 캐릭터를 직접 조작하고, 샘플 메뉴에서 모델의 크기와 재질을 살펴볼 수 있습니다.', ex: [
-      { t: '해안 레이싱', d: '운전석으로 다가가 E로 탑승합니다. 자동 변속으로 3개 체크포인트와 결승선을 통과합니다. O 운전석 문, W 가속, A/D 조향, Space 제동, 제동 중 조향으로 드리프트, R 코스 복귀입니다.', code: "Modes.set('drive');", run: 1 },
+      { t: '해안 레이싱', d: '운전석 옆에서 E나 O를 누르세요. 문이 열리면 3초 뒤 출발합니다. 자동 변속으로 3개 체크포인트와 결승선을 통과합니다. W 가속, A/D 조향, Space 제동, 제동 중 조향으로 드리프트, R 코스 복귀입니다.', code: "Modes.set('drive');", run: 1 },
       { t: 'FPS 사격장', d: '마우스를 움직여 중앙 조준점으로 표적을 겨누세요. 화면 가장자리에 두면 계속 선회합니다. 왼쪽 클릭은 발사, 오른쪽 클릭이나 R은 재장전입니다. WASD로 이동하고 Space로 점프하며 C로 앉습니다. Esc로 일시정지하면 커서가 나타납니다. 계속하기를 클릭하면 다시 조준합니다.', code: "Modes.set('fps');", run: 1 },
       { t: '경비행', d: '활주로의 조종석으로 다가가 E로 탑승합니다. W/S 출력, 마우스 위·아래 또는 ↑/↓로 기수 조종, A/D 선회, 지상 Space 제동입니다. E로 하차하고 공중에서는 낙하산이 펼쳐집니다.', code: "Modes.set('flight');", run: 1 },
       { t: '3인칭 RPG', d: 'V 모드의 캐릭터 이동, 추적 카메라, 대기·걷기 전환을 활용할 수 있습니다. 여기에 상호작용, 대화와 인벤토리를 연결해 보세요.', code: '' },
@@ -10871,98 +10906,140 @@ const Guide = (() => {
 // ===== 92_workbench.js =====
 
 const Workbench=(()=>{
-  const descriptions={
-    free:'섬과 해안을 자유롭게 둘러봅니다.',actors:'걷기, 달리기 점프, 암벽 등반을 합니다.',bee:'벌의 눈으로 정원을 날아봅니다.',
-    fps:'가상 블래스터로 발광 표적을 맞힙니다.',drive:'운전석에 올라 해안 코스를 달립니다.',flight:'활주로에서 경비행기를 타고 이륙합니다.',
-    boat:'배를 조종해 부표를 통과합니다.',sub:'잠수하고 잠망경으로 수면을 관찰합니다.',fishing:'미끼를 골라 입질을 기다리고 낚아 올립니다.',collect:'시간 안에 흩어진 통을 수집합니다.'};
-  const bar=document.createElement('nav'),menu=document.createElement('dialog');bar.id='world-bar';menu.id='system-menu';
-  bar.setAttribute('aria-label','시뮬레이션');bar.innerHTML='<span>플레이 모드</span><button type="button" data-visual aria-haspopup="dialog">게임 비주얼</button><button type="button" data-system aria-haspopup="dialog">시스템 메뉴</button>';
-  menu.setAttribute('aria-labelledby','system-title');
-  menu.innerHTML=`<header><h1 id="system-title">Bee Garden</h1><button data-close aria-label="시스템 메뉴 닫기">닫기 ×</button></header>
-    <nav aria-label="시스템 기능"><button data-tab="play">플레이</button><button data-tab="make">AI 게임 제작</button><button data-tab="tools">도구와 설정</button><button data-visual aria-haspopup="dialog">게임 비주얼</button></nav>
-    <section data-page="play"><form class="quick-idea"><label for="quick-game-idea">만들고 싶은 게임</label><div><input id="quick-game-idea" maxlength="1800" placeholder="예: 밤바다에서 물고기 세 마리 낚기"><button class="primary">AI로 만들기</button></div></form><h2>시뮬레이션 선택</h2><div class="mode-grid"></div></section>
-    <section data-page="make" hidden><h2>만들고 싶은 게임</h2><form><textarea required maxlength="1800" rows="3" aria-label="만들고 싶은 게임" placeholder="예: 비 오는 해안에서 감성돔 세 마리를 잡는 픽셀 낚시 게임"></textarea>
-    <div class="ai-settings"><label>작업<select name="operation"><option value="new">새 게임 만들기</option><option value="edit">현재 게임 개편</option></select></label>
-    <label>생성 방법<select name="provider"><option value="local">로컬 AI · Ollama</option><option value="browser">브라우저 내장 AI</option><option value="template">즉시 규칙 초안</option></select></label></div>
-    <details data-connect><summary>로컬 AI 연결 방법</summary><p>Ollama 실행 후 엔진 저장소에서 <code>python engine/tools/serve_studio.py</code>를 실행하세요. 아래에 설치된 모델 이름을 입력하세요.</p><label>Ollama 모델 <input name="model" value="qwen2.5:7b" maxlength="100"></label></details>
-    <div class="ai-submit"><button class="primary" type="submit">게임 초안 생성</button><output aria-live="polite"></output></div></form>
-    <article data-preview hidden><h3></h3><p></p><button data-apply class="primary">이 설정으로 플레이</button></article></section>
-    <section data-page="tools" hidden><h2>도구와 설정</h2><div class="tool-grid"></div><div class="ai-settings"><label>날씨 <select data-weather></select></label><label>시각 <input data-hour type="range" min="0" max="23.75" step=".25"><output data-time></output></label></div></section>`;
-  const css=document.createElement('style');css.textContent=`
-    #world-bar{position:fixed;top:max(10px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));display:flex;align-items:center;gap:7px;color:#f2f5e7;font:600 12px system-ui;z-index:7;background:#142a26ed;border:1px solid #8ca59888;border-radius:8px;padding:4px 6px}
-    #world-bar #mode-picker,#world-bar button{position:static!important;background:#223c35!important;color:#eef5e5!important;border:1px solid #769084!important;border-radius:5px!important;font:600 13px system-ui!important;padding:5px 8px!important;height:33px!important;cursor:pointer}
-    #world-bar>span{padding-left:3px}#mode-hint{max-width:calc(100vw - 52px);white-space:normal!important}#scenario-goal{position:fixed;z-index:5;top:70px;left:50%;transform:translateX(-50%);background:#142b27ed;color:#f3eecf;border-radius:5px;padding:6px 9px;font:600 12px system-ui;text-align:center}
-    #system-menu{box-sizing:border-box;color:#1c342c;background:#f4f3e8;border:1px solid #9aafa0;border-radius:14px;padding:0;width:min(730px,calc(100vw - 26px));max-height:86dvh;box-shadow:0 20px 70px #06191070;font:500 14px/1.45 system-ui}
-    #system-menu::backdrop{background:#081c19a6}#system-menu header,#system-menu>nav,#system-menu>section{padding:16px 23px}#system-menu header{display:flex;align-items:center;justify-content:space-between;background:#19392d;color:#faf5dc}#system-menu h1{margin:0;font:700 26px/1.1 Georgia,serif}
-    #system-menu button,#system-menu select,#system-menu input,#system-menu textarea{font:inherit;color:inherit;box-sizing:border-box}#system-menu button{cursor:pointer}#system-menu :focus-visible,#world-bar :focus-visible{outline:3px solid #c77537;outline-offset:2px}
-    #system-menu button{border:1px solid #b2bfb0;background:#fdfcf5;padding:8px 11px;border-radius:6px;text-align:left}#system-menu header button{background:transparent;color:inherit;border-color:#87a38f}
-    #system-menu>nav{display:flex;gap:5px;border-bottom:1px solid #c3cdbd;padding-top:10px;padding-bottom:10px}#system-menu>nav button{border:none;background:transparent}#system-menu>nav button[aria-pressed=true],#system-menu .primary{background:#245643;color:white}
-    #system-menu h2{margin:0 0 12px;font-size:19px}#system-menu .mode-grid,#system-menu .tool-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
-    #system-menu .mode-grid button span,#system-menu .tool-grid button span{display:block;color:#53685a;font-size:12px;margin-top:2px}#system-menu .mode-grid button[aria-current=true]{border-color:#387455;box-shadow:inset 3px 0 #387455}
-    #system-menu textarea,#system-menu input,#system-menu select{border:1px solid #9aac9c;background:#fffef7;border-radius:5px;padding:7px}#system-menu textarea{width:100%;resize:vertical}
-    #system-menu .quick-idea{margin:0 0 15px}#system-menu .quick-idea label{display:block;font-weight:700;margin-bottom:5px}#system-menu .quick-idea div{display:flex;gap:5px}#system-menu .quick-idea input{flex:1;min-width:0}#system-menu .quick-idea button{white-space:nowrap}
-    #system-menu .ai-settings,#system-menu .ai-submit{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:10px 0}#system-menu label{display:inline-flex;gap:6px;align-items:center;font-size:13px}#system-menu details{font-size:12px}#system-menu details p{margin:6px 0}
-    #system-menu article{border-top:1px solid #adbcae;margin-top:15px;padding-top:8px}#system-menu article :is(h3,p){margin:5px 0}#system-menu [hidden]{display:none!important}
-    #sample-button,#studio-open,#engine-sound{display:none!important}#lighting-panel{top:60px!important;z-index:8!important}
-    @media(max-width:620px){#world-bar>span{display:none}#system-menu header,#system-menu>nav,#system-menu>section{padding:12px}#system-menu .mode-grid button,#system-menu .tool-grid button{padding:8px}#mode-hint{font-size:10px!important;padding:4px 7px!important}#scenario-goal{top:auto;bottom:9px;width:max-content;max-width:80vw}}
-  `;document.head.append(css);document.body.append(bar,menu);
-  const $=s=>menu.querySelector(s),picker=document.querySelector('#mode-picker'),launch=bar.querySelector('[data-system]'),visual=bar.querySelector('[data-visual]');
-  bar.insertBefore(picker,visual);let current='play',proposal=null,revision=0;
-  visual.onclick=()=>VisualControls.open(()=>visual.blur());
-  $('[data-visual]').onclick=()=>{close();VisualControls.open(()=>{open();$('[data-visual]').focus();});};
-  function tab(id){
-    current=id;for(const s of menu.querySelectorAll('[data-page]'))s.hidden=s.dataset.page!==id;
-    for(const b of menu.querySelectorAll('[data-tab]'))b.setAttribute('aria-pressed',String(b.dataset.tab===id));
-    for(const b of menu.querySelectorAll('[data-mode]'))b.setAttribute('aria-current',String(b.dataset.mode===Modes.cur));
-    if(id==='tools'){$('[data-weather]').value=Weather.S.mode;$('[data-hour]').value=G.day;$('[data-time]').textContent=Math.floor(G.day)+'시';}
+  const bar=document.createElement('nav'), form=document.createElement('form');
+  bar.id='world-bar';bar.setAttribute('aria-label','월드 메뉴');form.id='game-composer';
+  bar.innerHTML=`<div class="bar-main"><button type="button" data-menu="play" aria-controls="play-row">플레이 모드</button>
+    <button type="button" data-menu="visual" aria-controls="game-visual">게임 비주얼</button><button type="button" data-menu="tools" aria-controls="tools-row">도구</button></div>
+    <div id="play-row" class="bar-row" aria-label="플레이 모드" hidden></div>
+    <div id="tools-row" class="bar-row" aria-label="도구" hidden><label>날씨 <select data-weather></select></label><label>시각 <input data-hour type="range" min="0" max="23.75" step=".25"><output data-time></output></label></div>`;
+  form.innerHTML=`<div class="composer-line"><label for="game-idea">제작할 게임</label><input id="game-idea" required maxlength="1800" autocomplete="off" placeholder="만들고 싶은 게임을 입력하세요"><button type="submit">만들기</button>
+    <button type="button" data-settings aria-controls="composer-settings" aria-expanded="false">설정</button></div>
+    <section id="composer-settings" hidden><div class="choices"><label>작업 <select name="operation"><option value="new">새 게임 만들기</option><option value="edit">현재 게임 개편</option></select></label>
+    <label>생성 방법 <select name="provider"><option value="local">로컬 AI · Ollama</option><option value="browser">브라우저 내장 AI</option><option value="template">즉시 규칙 초안</option></select></label></div>
+    <details data-connect><summary>로컬 AI 연결 방법</summary><p>Ollama와 <code>python engine/tools/serve_studio.py</code>를 실행하고 설치된 모델 이름을 입력하세요.</p><label>Ollama 모델 <input name="model" value="qwen2.5:7b" maxlength="100"></label></details>
+    <output data-status aria-live="polite"></output><article data-preview hidden><strong></strong><p></p><button type="button" data-apply>이 설정으로 플레이</button></article></section>`;
+  document.body.append(bar,form);
+  const picker=document.querySelector('#mode-picker'), visual=document.querySelector('#game-visual');
+  picker.hidden=true;bar.append(picker,visual);
+  const play=bar.querySelector('#play-row'),tools=bar.querySelector('#tools-row'),buttons=[...bar.querySelectorAll('[data-menu]')];
+  const rows={play,visual,tools},settings=form.querySelector('#composer-settings'),settingsButton=form.querySelector('[data-settings]');
+  const input=form.querySelector('#game-idea'),status=form.querySelector('[data-status]'),preview=form.querySelector('[data-preview]');
+  const {provider,operation,model}=form.elements;
+  let current=null,proposal=null,revision=0;
+  function syncMode(){
+    const selected=picker.selectedOptions[0];
+    buttons[0].textContent=selected?.textContent||'플레이 모드';buttons[0].setAttribute('aria-label','플레이 모드 · '+buttons[0].textContent);
+    for(const b of play.children)b.setAttribute('aria-current',String(b.dataset.mode===picker.value));
   }
-  function close(){if(menu.open)menu.close();launch.blur();Modes.keys.clear();}
-  function open(id=current){
-    if(document.pointerLockElement)document.exitPointerLock();Modes.keys.clear();tab(id);
-    if(!menu.open)menu.showModal();if(id==='make')$('textarea').focus();
+  function showSettings(show){
+    settings.hidden=!show;settingsButton.setAttribute('aria-expanded',String(show));
   }
-  launch.onclick=()=>open();$('[data-close]').onclick=close;
-  for(const b of menu.querySelectorAll('[data-tab]'))b.onclick=()=>tab(b.dataset.tab);
-  menu.addEventListener('keydown',e=>e.stopPropagation());menu.addEventListener('keyup',e=>e.stopPropagation());
-  menu.addEventListener('close',()=>{launch.blur();Modes.keys.clear();});
-  function tile(parent,title,desc,fn){
-    const b=document.createElement('button');b.type='button';const t=document.createElement('strong'),s=document.createElement('span');
-    t.textContent=title;s.textContent=desc;b.append(t,s);b.onclick=fn;parent.append(b);return b;
+  function open(id){
+    if(id==='make'){open(null);showSettings(true);input.focus();return;}
+    current=id;
+    for(const b of buttons){const on=b.dataset.menu===id;b.setAttribute('aria-expanded',String(on));rows[b.dataset.menu].hidden=!on;}
+    if(!id)return;
+    if(document.pointerLockElement)document.exitPointerLock();
+    Modes.keys.clear();showSettings(false);
+    if(id==='visual')VisualControls.refresh();
+    if(id==='tools'){weather.value=Weather.S.mode;hour.value=G.day;time.textContent=Math.floor(G.day)+'시';}
+    if(id==='play')play.querySelector('[aria-current=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});
   }
-  for(const opt of picker.options)if(descriptions[opt.value]){
-    const b=tile($('.mode-grid'),opt.text,descriptions[opt.value],()=>{close();Modes.set(opt.value);});b.dataset.mode=opt.value;
+  for(const b of buttons)b.onclick=()=>open(current===b.dataset.menu?null:b.dataset.menu);
+  function addButton(parent,label,fn){
+    const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;parent.append(b);return b;
   }
-  const click=id=>document.getElementById(id).click(),tools=$('.tool-grid');
-  tile(tools,'GLB · 프로젝트','모델 가져오기와 프로젝트 저장',()=>{close();click('studio-open');});
-  tile(tools,'캐릭터 · 모델 샘플','사람, 개구리, 건물과 탈것 둘러보기',()=>{close();click('sample-button');});
-  tile(tools,'조명 설정','그림자, 반사, 주변광과 렌즈 비교',()=>{close();LookPanel.open();});
-  tile(tools,'엔진 활용법','모드별 조작, 예제 코드와 제작 방법',()=>{close();Guide.toggle();});
-  const sound=tile(tools,'소리','',()=>{click('engine-sound');sound.lastChild.textContent=document.getElementById('engine-sound').textContent;});
-  for(const [id,label] of Object.entries(Weather.NAME))$('[data-weather]').add(new Option(label,id));
-  $('[data-weather]').onchange=e=>Weather.set(e.target.value);
-  $('[data-hour]').oninput=e=>{G.day=+e.target.value;$('[data-time]').textContent=Math.floor(G.day)+'시';};
-  const form=$('[data-page="make"] form'),input=$('textarea'),status=form.querySelector('output'),preview=$('[data-preview]'),provider=form.elements.provider;
-  $('.quick-idea').onsubmit=e=>{e.preventDefault();const q=$('#quick-game-idea').value.trim();if(q){input.value=q;input.dispatchEvent(new Event('input',{bubbles:true}));}tab('make');input.focus();};
-  form.addEventListener('input',()=>{revision++;proposal=null;preview.hidden=true;status.textContent='';$('[data-connect]').hidden=provider.value!=='local';});
+  for(const opt of picker.options)if(!opt.disabled){
+    const b=addButton(play,opt.text,()=>{open(null);Modes.set(opt.value);});b.dataset.mode=opt.value;
+  }
+  picker.addEventListener('modechange',syncMode);
+  const click=id=>document.getElementById(id).click();
+  const links=document.createElement('div');links.className='tool-links';tools.prepend(links);
+  for(const [label,fn] of [['GLB · 프로젝트',()=>click('studio-open')],['모델 샘플',()=>click('sample-button')],['조명',()=>LookPanel.open()],['활용법',()=>Guide.toggle()]]){
+    addButton(links,label,()=>{open(null);fn();});
+  }
+  const sound=addButton(links,'소리',()=>{click('engine-sound');sound.textContent=document.querySelector('#engine-sound').textContent;});
+  const weather=tools.querySelector('[data-weather]'),hour=tools.querySelector('[data-hour]'),time=tools.querySelector('[data-time]');
+  for(const [id,label] of Object.entries(Weather.NAME))weather.add(new Option(label,id));
+  weather.onchange=()=>Weather.set(weather.value);
+  hour.oninput=()=>{G.day=+hour.value;time.textContent=Math.floor(G.day)+'시';};
+  settingsButton.onclick=()=>{open(null);showSettings(settings.hidden);};
+  form.addEventListener('input',()=>{
+    revision++;proposal=null;preview.hidden=true;status.textContent='';
+    form.querySelector('[data-connect]').hidden=provider.value!=='local';
+    form.querySelector('[type=submit]').disabled=false;
+  });
   form.onsubmit=async e=>{
-    e.preventDefault();const request=input.value.trim();if(!request)return;
-    const id=++revision,button=form.querySelector('[type=submit]');button.disabled=true;preview.hidden=true;
+    e.preventDefault();const request=input.value.trim();if(!request){input.focus();return;}
+    open(null);showSettings(true);
+    const id=++revision,button=form.querySelector('[type=submit]');button.disabled=true;proposal=null;preview.hidden=true;
     status.textContent=provider.value==='template'?'규칙을 구성하는 중…':'AI 응답을 기다리는 중…';
-    try{const p=await Scenario.generate(request,provider.value,form.elements.model.value.trim(),form.elements.operation.value==='edit');
-      if(id!==revision)return;proposal=p;preview.hidden=false;preview.querySelector('h3').textContent=p.title;
+    try{const p=await Scenario.generate(request,provider.value,model.value.trim(),operation.value==='edit');
+      if(id!==revision)return;proposal=p;preview.hidden=false;preview.querySelector('strong').textContent=p.title;
       preview.querySelector('p').textContent=[Modes.MODES[p.mode].name,VisualStyle.names[p.style],Weather.NAME[p.weather],Math.floor(p.hour)+'시',Scenario.goal(p)].join(' · ');status.textContent='초안을 확인하세요.';
     }catch(err){if(id===revision)status.textContent=err instanceof TypeError?'AI 연결 실패. 로컬 AI 연결 방법을 확인하거나 즉시 규칙 초안을 선택하세요.':err.message;}
-    finally{button.disabled=false;}
+    finally{if(id===revision)button.disabled=false;}
   };
-  $('[data-apply]').onclick=()=>{if(!proposal)return;close();Scenario.apply(proposal,form.elements.operation.value==='new');
-    const idea=document.querySelector('[data-idea]');if(idea)idea.value=input.value;};
+  form.querySelector('[data-apply]').onclick=()=>{if(!proposal)return;Scenario.apply(proposal,operation.value==='new');
+    const idea=document.querySelector('[data-idea]');if(idea)idea.value=input.value;showSettings(false);document.activeElement?.blur();};
+  for(const region of [bar,form]){
+    region.addEventListener('keydown',e=>{
+      e.stopPropagation();if(e.isComposing||e.keyCode===229)return;
+      if(e.key==='Escape'){e.preventDefault();if(region===form){showSettings(false);document.activeElement?.blur();}
+        else{const trigger=buttons.find(b=>b.dataset.menu===current);open(null);trigger?.focus();}}
+      const b=e.target.closest('#play-row button');
+      if(b&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const all=[...play.children],i=all.indexOf(b);
+        all[e.key==='Home'?0:e.key==='End'?all.length-1:(i+(e.key==='ArrowRight'?1:all.length-1))%all.length].focus();}
+    });
+    region.addEventListener('keyup',e=>e.stopPropagation());
+  }
+  document.addEventListener('pointerdown',e=>{if(current&&!bar.contains(e.target))open(null);if(!form.contains(e.target))showSettings(false);});
+  open(null);syncMode();
   function build(){
-    sound.lastChild.textContent=document.getElementById('engine-sound').textContent;
-    if(Q.get('menu')==='visual'){VisualControls.open();return;}
-    if(!Q.has('mode')&&!Q.has('project')&&!Q.has('capture')&&!Q.has('nopanel')&&!Q.has('guide')&&!Q.has('cam'))open('play');
-    if(Q.get('menu')==='make')open('make');
+    sound.textContent=document.getElementById('engine-sound').textContent;
+    const target=Q.get('menu');if(target==='make'||Object.hasOwn(rows,target))open(target);
   }
   return {build,open};
 })();
+
+// ===== 92_workbench_style.js =====
+
+{
+  const css=document.createElement('style');
+  css.textContent=`
+    :root{--composer-floor:calc(58px + env(safe-area-inset-bottom,0px))}
+    #world-bar,#game-composer{position:fixed;z-index:7;color:#f0f5e8;font:600 13px/1.4 system-ui,sans-serif;color-scheme:dark}
+    #world-bar{top:max(8px,env(safe-area-inset-top));left:max(8px,env(safe-area-inset-left));max-width:calc(100vw - 18px - env(safe-area-inset-left) - env(safe-area-inset-right))}
+    #world-bar .bar-main,#world-bar .bar-row,#game-visual,#game-composer .composer-line,#composer-settings{background:#19312cec;border:1px solid #829d8d;border-radius:8px;box-shadow:0 2px 8px #101c1d33}
+    #world-bar .bar-main,#world-bar .bar-row,.tool-links,#game-visual .visual-grid,#game-visual .visual-options,#game-composer .composer-line,#composer-settings .choices{display:flex;align-items:center;gap:5px}
+    #world-bar .bar-main,#world-bar .bar-row,#game-visual{width:max-content;max-width:100%;box-sizing:border-box;padding:4px}
+    #world-bar .bar-row,#game-visual{position:absolute;left:0;top:calc(100% + 4px);max-width:calc(100vw - 18px - env(safe-area-inset-left) - env(safe-area-inset-right))}
+    #world-bar .bar-row,#game-visual .visual-grid,#game-visual .visual-options{overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;white-space:nowrap}
+    #world-bar button,#world-bar select,#game-visual .visual-grid span,#game-composer button,#game-composer input,#game-composer select{box-sizing:border-box;border:1px solid #769084;border-radius:5px;padding:6px 9px;background:#29453a;color:inherit;font:inherit}
+    #world-bar button,#world-bar select,#game-composer button,#game-composer select{cursor:pointer}
+    #world-bar button,.tool-links,#world-bar .bar-row label,#game-visual label{flex:none}
+    #world-bar .bar-main button:after{content:'▾';margin-left:6px;color:#a6bdac}
+    #world-bar .bar-main button[aria-expanded=true]:after{content:'▴'}
+    #world-bar button[aria-expanded=true],#world-bar button[aria-current=true],#game-visual input:checked+span,#game-composer button[type=submit],#game-composer [data-apply]{background:#cfe5c6;color:#203a2b}
+    #world-bar :focus-visible,#game-composer :focus-visible,#game-visual input:focus-visible+span{outline:2px solid #ffcf89;outline-offset:-2px}
+    #world-bar [hidden],#game-composer [hidden],#sample-button,#studio-open,#engine-sound{display:none!important}
+    #game-visual .visual-grid{padding-bottom:3px}#game-visual .visual-grid label{position:relative;cursor:pointer}#game-visual .visual-grid input{position:absolute;opacity:0;width:1px;height:1px}#game-visual .visual-grid span{display:block}
+    #game-visual .visual-options,#world-bar .bar-row label{display:flex;align-items:center;gap:6px}#game-visual .visual-options{padding:3px 1px 0}#game-visual select{margin-left:4px}#world-bar [data-hour]{width:80px}
+    #game-composer{bottom:max(6px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);width:min(610px,calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right)));box-sizing:border-box}
+    #game-composer .composer-line{padding:5px}#game-composer .composer-line label{white-space:nowrap;padding:0 3px}#game-composer #game-idea{flex:1;min-width:0;background:#f5f6eb;color:#21352f}#game-composer #game-idea::placeholder{color:#59675e}
+    #game-composer button{white-space:nowrap}#game-composer button:disabled{opacity:.65}
+    #composer-settings{position:absolute;bottom:calc(100% + 4px);left:0;right:0;max-height:42dvh;overflow:auto;padding:10px}
+    #composer-settings .choices{flex-wrap:wrap}#composer-settings details,#composer-settings article,#composer-settings [data-status]:not(:empty){display:block;margin-top:8px}#composer-settings p{margin:4px 0 8px}
+    #scenario-goal{position:fixed;z-index:5;top:70px;left:50%;transform:translateX(-50%);background:#142b27ed;color:#f3eecf;border-radius:5px;padding:5px 8px;font:600 12px system-ui;text-align:center}
+    #mode-hint{max-width:calc(100vw - 40px);white-space:normal!important}#mode-hint,#drive-hud,#pulse-counter,#marine-gauges{bottom:var(--composer-floor)!important}
+    #fishing-panel{bottom:calc(var(--composer-floor) + 33px)!important}#race-touch{bottom:calc(var(--composer-floor) + 46px)!important}
+    @media(max-width:800px){#world-weather{top:calc(70px + clamp(85px,13vmin,134px))!important;left:max(12px,env(safe-area-inset-left))!important;transform:none!important;font-size:10px!important}}
+    #lighting-panel{top:60px!important;z-index:8!important}
+    @media(max-width:620px){#game-composer,#world-bar{font-size:12px}#game-composer input,#game-composer select{font-size:16px}#game-composer :is(button,input){padding:6px}
+      #mode-hint{font-size:10px!important;padding:4px 7px!important}#scenario-goal{top:104px;max-width:72vw}
+      #race-touch{bottom:calc(var(--composer-floor) + 44px)!important}}
+  `;
+  document.head.append(css);
+}
 
 </script></body></html>

@@ -16,10 +16,10 @@ const Modes = (() => {
     fly.pitch=Math.atan2(Island.surf(tx,tz)[0]+3.1-fly.p.y,Math.hypot(tx-x,tz-z));
   }
   addEventListener('pointerdown', e => { if (e.target.tagName === 'CANVAS') fly.drag = true; }); addEventListener('pointerup', () => { fly.drag = false; });
-  addEventListener('pointermove', e => { if (!fly.drag || cur !== 'free') return; fly.yaw -= e.movementX * .0032; fly.pitch = clamp(fly.pitch - e.movementY * .0032, -1.45, 1.45); });
+  addEventListener('pointermove', e => { if (!fly.drag || (cur !== 'free' && cur !== 'collect')) return; fly.yaw -= e.movementX * .0032; fly.pitch = clamp(fly.pitch - e.movementY * .0032, -1.45, 1.45); });
   let beeT = 0, eyeOn = false;       // B: the compound-eye view, in the bee's mode
   const MODES = {
-    free: { name: '자유', enter() {}, leave() {}, step(camera, dt) { const sp = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? CC.flyFast : CC.flySpeed) * dt, cy = Math.cos(fly.yaw), sy = Math.sin(fly.yaw), f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
+    free: { name: '자유시점', enter() {}, leave() {}, step(camera, dt) { const sp = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? CC.flyFast : CC.flySpeed) * dt, cy = Math.cos(fly.yaw), sy = Math.sin(fly.yaw), f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
       flyDelta.set((-sy*f+cy*s)*Math.cos(fly.pitch),Math.sin(fly.pitch)*f+Number(keys.has('KeyE'))-Number(keys.has('KeyQ')),(-cy*f-sy*s)*Math.cos(fly.pitch)).multiplyScalar(sp);
       if (flyDelta.lengthSq()) {
         const hit=Phys.castBox(fly.p,flyHalf,identity,flyDelta);
@@ -33,14 +33,14 @@ const Modes = (() => {
   const picker = document.createElement('select');
   picker.id='mode-picker'; picker.setAttribute('aria-label','플레이 모드');
   picker.style.cssText='position:fixed;right:max(14px,env(safe-area-inset-right));top:100px;z-index:6;max-width:148px;height:35px;background:#211e1aee;color:#f3e6d2;border:1px solid #eddbbf55;border-radius:8px;padding:3px 8px;font:600 13px system-ui;cursor:pointer;color-scheme:dark';
-  for (const [id,label] of [['free','1 자유 비행'],['bee','2 벌'],['fps','3 FPS'],['drive','4 레이싱'],['flight','5 경비행'],['boat','6 배'],['sub','7 잠수함'],['fishing','8 낚시'],['actors','V 캐릭터'],['collect','0 통 모으기'],['sample','모델 보기']]) {
+  for (const [id,label] of [['free','1 자유시점'],['bee','2 벌'],['fps','3 FPS'],['drive','4 레이싱'],['flight','5 경비행'],['boat','6 배'],['sub','7 잠수함'],['fishing','8 낚시'],['actors','V 캐릭터'],['collect','0 통+돌 랜덤 낙하'],['sample','모델 보기']]) {
     const opt = new Option(label,id); if (id==='sample') opt.disabled=true; picker.add(opt);
   }
   picker.addEventListener('focus',()=>keys.clear());
   picker.addEventListener('keydown',e=>e.stopPropagation());
   picker.addEventListener('change',()=>{set(picker.value);picker.blur();}); document.body.append(picker);
   const hud = document.createElement('div'); hud.style.cssText = 'position:fixed;left:14px;bottom:14px;font:600 12px/1.5 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f3e6d2;background:rgba(14,12,10,.55);padding:8px 12px;border-radius:10px;border:1px solid rgba(243,217,189,.18);z-index:4;pointer-events:none;white-space:pre'; document.body.appendChild(hud);
-  function set(name,restart=false) { if (name==='hike') name='fps'; if (!MODES[name] || (name === cur&&!restart)) return; keys.clear(); MODES[cur].leave(); if (cur !== 'free' && cur !== 'drive') fly.p.copy(G.camera.position); cur = name; picker.value=cur; MODES[cur].enter(); hudAt = 0; }
+  function set(name,restart=false) { if (name==='hike') name='fps'; if (!MODES[name] || (name === cur&&!restart)) return; keys.clear(); MODES[cur].leave(); if (cur !== 'free' && cur !== 'drive') fly.p.copy(G.camera.position); cur = name; picker.value=cur; picker.dispatchEvent(new Event('modechange')); MODES[cur].enter(); hudAt = 0; }
   // the shadow map: a box around the lens, snapped to its own texels so it does not swim; small for the bee, wide from the air
   const SHP = [[310, 520, 20, 1100, -.00035, .22], [75, 260, 1, 520, -.00008, .07], [7, 40, 1, 80, -.00004, .0025], [24, 100, 1, 205, -.000035, .009]], SR = new THREE.Vector3(), SU = new THREE.Vector3(); let shMode = -1;
   function shadows(camera) {
@@ -52,7 +52,7 @@ const Modes = (() => {
     sun.target.position.copy(c); sun.position.copy(c).addScaledVector(S, p[1]); sun.target.updateMatrixWorld(); sun.updateMatrixWorld(); }
   // add(id, mode, keyCode, keyLabel): a module brings its own mode, e.g. Modes.add('collect', {...}, 'Digit0', '0')
   const extra = {}; function add(id, mode, code, label) { MODES[id] = mode; if (code) { extra[code] = id; mode.key = label || code; } }
-  function step(camera, dt) { if (!booted) { booted = true; const requested = Q.get('mode'), want = requested==='hike' ? 'fps' : requested; if (MODES[want]) cur = want; picker.value=cur; MODES[cur].enter(); if (cur==='free') visitOutcrop(); }
+  function step(camera, dt) { if (!booted) { booted = true; const requested = Q.get('mode'), want = requested==='hike' ? 'fps' : requested; if (MODES[want]) cur = want; picker.value=cur; picker.dispatchEvent(new Event('modechange')); MODES[cur].enter(); if (cur==='free') visitOutcrop(); }
     camera.near = .3; Post.lens.aperture = 0; Post.lens.focus = 10; Post.lens.fisheye = false; if (cur !== 'bee') Post.lens.eye = 0; let line;
     const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); camera.fov = fix[6] || CC.fov; camera.near = fix[7] || .3; line = ''; }
     else line = MODES[cur].step(camera, dt);

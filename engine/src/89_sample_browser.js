@@ -115,7 +115,7 @@ const SampleBrowser = (() => {
       G.scene.add(holder); shown = holder; holder.updateMatrixWorld(true);
       footprint.setFromObject(holder,true); removeSolid = Phys.meshSolid(holder); updateWalkButton();
       target.set(x,y + .5*size.y*scale,z); radius = Math.max(.1, size.length() * scale / 2);
-      status = item.label + ' · 끌어서 회전 · 1 자유 비행';
+      status = item.label + ' · 끌어서 회전 · 1 자유시점';
     } catch (error) {
       if (request === ticket && shown) clearWorld(); else release(scene);
       if (request === ticket) {

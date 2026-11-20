@@ -95,6 +95,18 @@ const Phys = (() => {
     const b = world.createRigidBody(bd); world.createCollider(K.col(R.ColliderDesc).setDensity(K.rho).setFriction(K.fr).setRestitution(K.re), b);
     const e = { b, kind, i: K.used++, vol: K.vol, r: K.r, area: K.area, on: true, wet: 0 }; K.im.count = K.used; K.im.setColorAt(e.i, _c.set(o.color === undefined ? K.tint : o.color)); if (K.im.instanceColor) K.im.instanceColor.needsUpdate = true;
     bodies.push(e); show(e); return e; }
+  function remove(e) {
+    const index=bodies.indexOf(e);
+    if(index<0||!e.kind)return;
+    const k=KIND[e.kind],last=k.used-1;
+    if(e.i!==last){
+      const moved=bodies.find(other=>other.kind===e.kind&&other.i===last);
+      k.im.getMatrixAt(last,_m);k.im.setMatrixAt(e.i,_m);
+      k.im.getColorAt(last,_c);k.im.setColorAt(e.i,_c);moved.i=e.i;
+      k.im.instanceMatrix.needsUpdate=true;k.im.instanceColor.needsUpdate=true;
+    }
+    k.im.count=--k.used;bodies.splice(index,1);world.removeRigidBody(e.b);
+  }
   // a body another module made and draws itself (the car): it gets the sea, the wind and the blasts like everything else
   function adopt(b, o) { const e = { b, kind: null, vol: o.vol, r: o.r, area: o.area || 0, on: true, manual: true, wet: 0, lift: o.lift || null }; bodies.push(e); return e; }
   function show(e) { const K = KIND[e.kind], t = e.b.translation(), q = e.b.rotation(); _m.compose(_p.set(t.x, t.y, t.z), _q.set(q.x, q.y, q.z, q.w), _s.set(1, 1, 1)); K.im.setMatrixAt(e.i, _m); K.im.instanceMatrix.needsUpdate = true; }
@@ -212,7 +224,7 @@ const Phys = (() => {
     else if (c === 'KeyG') { const x = a.o.x + a.d.x * 9, z = a.o.z + a.d.z * 9; prime(x, z, 0); spawn('crate', x, Math.max(Island.surf(x, z)[0], SEA) + 2.2, z, { color: pick([0xd9c592, 0xcdb37a, 0xe6d6a6]) }); }
     else { const h = ray(a.o, a.d, 160); if (h) blast(h.x, h.y + .3, h.z); else blast(a.o.x + a.d.x * 20, a.o.y + a.d.y * 20, a.o.z + a.d.z * 20); } });
 
-  return { init, step, spawn, adopt, blast, ray, prime, thump, pre, KIND, bodies, wind, H, SEA,
+  return { init, step, spawn, remove, adopt, blast, ray, prime, thump, pre, KIND, bodies, wind, H, SEA,
     box,meshSolid,castBox,castPlayer,headroom,setPlayer,stopPlayer,setCompanion,
     get ready() { return ready; }, get R() { return R; }, get world() { return world; }, get hold() { return hold; }, set hold(v) { hold = v; },
     get stats() { return { bodies: bodies.length, awake: bodies.filter(e => e.on && !e.b.isSleeping()).length, tiles: tiles.size, cells: [...cells.values()].filter(c => c.cols).length, steps, stepMs: +stepMs.toFixed(2) }; } };

@@ -52,6 +52,8 @@ const Sky = (() => {
     // the air takes the horizon's colour, and thickens in rain and snow
     const wet = typeof Weather !== 'undefined' ? Math.max(Weather.S.rain, Weather.S.snowing * .8) : 0;
     G.U.uSunDir.value.copy(light); G.U.uSunK.value.set(sun.color.r, sun.color.g, sun.color.b).multiplyScalar(sun.intensity / Math.PI * .5); G.U.uFogCol.value.copy(U.uHor.value).multiplyScalar(.92);
+    // At low solar angles the sky supplies more of the illumination inside long cast shadows.
+    sun.shadow.intensity = sunI > moonI ? lerp(.49, .83, sm(.06, .52, y)) : 1;
     sun.castShadow = G.look.shadows; G.U.uFogP.value.set(G.look.air ? C.fogDensity * (1 + 7 * wet + 2 * storm) : 0, C.fogFalloff, 0, 1 - storm);
     // mist gathers when the sun is low, after rain and in snow, and the wind clears it
     { const wnd = typeof Weather !== 'undefined' ? Weather.S.speed : 4, m = (.75 * (1 - sm(.04, .3, Math.abs(y))) * sm(-.25, -.02, y) + .5 * wet + .15) * (1 - sm(7, 18, wnd)); G.U.uFogM.value.set(G.look.air ? C.mist * m : 0, C.mistFalloff); }

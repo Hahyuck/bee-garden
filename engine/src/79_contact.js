@@ -1,4 +1,35 @@
 'use strict';
+// Local occlusion on the road follows the rendered tyres, including in the rear-view camera.
+const CarGroundShade=(()=>{
+  const tyres=Array.from({length:4},()=>new THREE.Vector3());
+  const centre=new THREE.Vector3(),heading=new THREE.Vector2(0,1);
+  let visible=false;
+  const active={get value(){return visible&&G.look.contact;}};
+  function bind(s,worldPosition){
+    Object.assign(s.sh.uniforms,{uCarShadeOn:active,uCarCentre:{value:centre},uCarHeading:{value:heading},uCarTyres:{value:tyres}});
+    s.fHead(`uniform bool uCarShadeOn; uniform vec3 uCarCentre,uCarTyres[4]; uniform vec2 uCarHeading;
+      float carGroundLight(vec3 p){
+        vec2 delta=p.xz-uCarCentre.xz;
+        if(!uCarShadeOn || dot(delta,delta)>6.25)return 1.;
+        vec2 side=vec2(uCarHeading.y,-uCarHeading.x);
+        vec2 local=abs(vec2(dot(delta,side),dot(delta,uCarHeading)));
+        float belly=(1.-smoothstep(.54,1.04,local.x))*(1.-smoothstep(1.27,2.03,local.y));
+        belly*=1.-smoothstep(.65,1.18,abs(p.y-uCarCentre.y));
+        float tyreShade=0.;
+        for(int i=0;i<4;i++){
+          vec2 offset=p.xz-uCarTyres[i].xz;
+          vec2 uv=vec2(dot(offset,side)/.25,dot(offset,uCarHeading)/.38);
+          float close=1.-smoothstep(.025,.29,abs(uCarTyres[i].y-p.y));
+          tyreShade=max(tyreShade,close*(1.-smoothstep(.16,1.,dot(uv,uv))));
+        }
+        return (1.-.52*belly)*(1.-.73*tyreShade);
+      }`);
+    s.f('#include <aomap_fragment>',`#include <aomap_fragment>
+      float groundLight=carGroundLight(${worldPosition});
+      reflectedLight.indirectDiffuse*=groundLight;reflectedLight.indirectSpecular*=groundLight;`);
+  }
+  return {tyres,bind,setPose(position,forward){visible=true;centre.copy(position);heading.set(forward.x,forward.z).normalize();},hide(){visible=false;}};
+})();
 // Short-range ambient occlusion, evaluated in camera space before focus, bloom and film.
 const GLSL_CONTACT = /* glsl */`
 varying vec2 vUv;

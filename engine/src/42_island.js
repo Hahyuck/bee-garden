@@ -103,6 +103,7 @@ vec3 poolLight(vec3 lit, vec3 viewNormal, vec3 wp, float footprint){
   return mix(lit,sky,water*fresnel*grazing);
 }`;
   function waterLighting(s, wp) {
+    CarGroundShade.bind(s,wp);
     s.sh.uniforms.uStandingWater = wetState;
     Object.assign(s.sh.uniforms, Sky.U);
     s.f('#include <emissivemap_fragment>', `float wetFoot=max(length(dFdx(${wp}.xz)),length(dFdy(${wp}.xz)));

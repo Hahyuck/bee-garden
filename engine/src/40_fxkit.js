@@ -135,17 +135,25 @@ vec3 fxSurface(vec3 alb){
   function coniferDepth() {
     const depth = new THREE.MeshDepthMaterial({depthPacking: THREE.RGBADepthPacking});
     patch(depth, s => {
-      s.vHead('attribute float aM; varying float treePart; varying vec2 treeUV; varying vec3 treeLocal;\n'+GLSL_WIND);
+      s.vHead('attribute float aM; uniform vec3 uSunDir; varying float treePart; varying vec2 treeUV, crownRay; varying vec3 treeLocal;\n'+GLSL_WIND);
       s.v('#include <begin_vertex>', `#include <begin_vertex>
-        treePart=aM; treeUV=uv; treeLocal=position;
+        treePart=aM; treeUV=uv; treeLocal=position; crownRay=vec2(0.);
         #ifdef USE_INSTANCING
           mat4 objectToWorld=modelMatrix*instanceMatrix;
           float height=max(0.,(objectToWorld*vec4(position,1.)).y-objectToWorld[3].y);
           mat3 rot=mat3(objectToWorld);
           transformed+=(clWind(objectToWorld[3].xyz,.02*height*height/(height+10.))*rot)/dot(rot[0],rot[0]);
+          // A sun ray keeps the same opening through overlapping foliage shells.
+          // Anchor the pattern at the tree, independent of the camera and shadow-map texels.
+          vec3 rel=rot*transformed;
+          vec3 side=normalize(vec3(uSunDir.z,0.,-uSunDir.x));
+          crownRay=vec2(dot(rel,side),dot(rel,cross(uSunDir,side)))+objectToWorld[3].xz;
         #endif`);
-      s.fHead(GLSL_NOISE+coniferMask+'\nvarying float treePart; varying vec2 treeUV; varying vec3 treeLocal;');
-      s.f('#include <alphatest_fragment>','#include <alphatest_fragment>\nif(openNeedles(int(treePart+.5),treeUV,treeLocal)) discard;');
+      s.fHead(GLSL_NOISE+coniferMask+'\nvarying float treePart; varying vec2 treeUV, crownRay; varying vec3 treeLocal;');
+      s.f('#include <alphatest_fragment>',`#include <alphatest_fragment>
+        int part=int(treePart+.5);
+        if(openNeedles(part,treeUV,treeLocal)) discard;
+        if(part==23 && .7*vnoise(crownRay*1.65)+.3*vnoise(crownRay*4.5)>.58) discard;`);
     }, 'conifer-depth');
     return depth;
   }

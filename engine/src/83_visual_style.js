@@ -21,8 +21,8 @@ const VisualStyle=(()=>{
   let yaw=0, pitch=0,zoom=1,pointer=null,px=0,py=0;
   const orbitOffset=new THREE.Vector3(),canvas=document.getElementById('c');
   function subject(){
-    if(ActorWalk.thirdPerson && !(Modes.cur==='drive'&&DriveRace.phase==='boarding'))return ActorWalk.position;
-    if(Modes.cur==='drive'&&Drive.on&&!Drive.cockpit)return Drive.car.p;
+    if(ActorWalk.thirdPerson)return ActorWalk.position;
+    if(Modes.cur==='drive'&&(Drive.on||DriveRace.phase==='grid')&&!Drive.cockpit)return Drive.car.p;
     if(Modes.cur==='boat')return Marine.position;
     return null;
   }
@@ -49,6 +49,7 @@ const VisualStyle=(()=>{
     zoom=clamp(zoom*Math.exp(-clamp(e.deltaY*unit,-800,800)*.00155),.55,3.5);
   },{passive:false});
   function frame(camera){
+    if(Modes.cur==='drive'&&DriveRace.phase==='opening')return;
     const offset=fixedView();if(!offset)return;
     const point=subject();
     if(!point){

@@ -1,20 +1,37 @@
 'use strict';
-// ---- an example of a game made on the engine, kept small on purpose: "gather the barrels". Press 0.
-//      Ten yellow barrels are set down around you; fly into one to take it; the clock runs for sixty seconds.
-//      It shows the four things a game needs from the engine: a mode of its own, things placed in the physics world,
-//      a rule checked every frame, and a line of readout. Copy this file to start a game of your own. ----
-const Collect = (() => {
-  const N = 10, TIME = 60; let items = [], score = 0, left = 0, best = 0;
-  function enter() { score = 0; left = TIME; const p = Modes.fly.p;
-    for (const e of items) if (!e.got) e.b.setTranslation({ x: 0, y: -100, z: 0 }, true);       // clear what the last round left (far below, the physics puts a body to rest)
-    items = []; for (let i = 0; i < N; i++) { const a = i / N * TAU, r = 14 + 22 * Math.random(), x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
-      Phys.prime(x, z, 0);                                                                       // make the ground solid there before something lands on it
-      const e = Phys.spawn('barrel', x, Math.max(Island.surf(x, z)[0], 0) + 1.5, z, { color: 0xffd040 }); if (e) items.push(e); } }
-  function step(camera, dt) { Modes.MODES.free.step(camera, dt);                                 // move like free flight
-    if (left > 0) { left -= dt; for (const e of items) { if (e.got) continue; const q = e.b.translation();
-        if (camera.position.distanceTo(q) < 2.6) { e.got = true; score++; FX.blast(q.x, q.y, q.z, 3); Phys.thump(.4); e.b.setTranslation({ x: q.x, y: -100, z: q.z }, true); } }
-      if (score === items.length || left <= 0) { best = Math.max(best, score); left = 0; } }
-    return left > 0 ? `통 모으기 ${score} / ${items.length} · 남은 시간 ${left.toFixed(0)}초` : `끝! ${score}개 · 최고 ${best}개 · 0 을 다시 누르면 새 판`; }
-  Modes.add('collect', { name: '통 모으기', enter, leave() {}, step }, 'Digit0', '0');
-  return { get score() { return score; }, get items() { return items; } };
+// Keep the saved mode id so existing projects and links still open slot 0.
+const FallingProps=(()=>{
+  const items=[],limit=24;
+  const direction=new THREE.Vector3();
+  let delay=0,count=0,firstKind='barrel';
+  function enter(){
+    count=0;delay=0;firstKind=Math.random()<.5?'barrel':'stone';
+    const road=Island.RD,fly=Modes.fly;
+    fly.p.set(road.px[0],road.py[0]+2.4,road.pz[0]);
+    fly.yaw=Math.atan2(road.px[0]-road.px[6],road.pz[0]-road.pz[6]);fly.pitch=.04;
+  }
+  function drop(camera){
+    camera.getWorldDirection(direction);const heading=Math.atan2(direction.x,direction.z);
+    const angle=heading+(Math.random()-.5)*.83,distance=6+Math.random()*6;
+    const x=camera.position.x+Math.sin(angle)*distance,z=camera.position.z+Math.cos(angle)*distance;
+    const y=Math.max(Island.support(x,z)+.5,Phys.SEA,camera.position.y)+1.6+Math.random()*2.7;
+    const kind=count===0?firstKind:count===1?(firstKind==='barrel'?'stone':'barrel'):(Math.random()<.5?'barrel':'stone');
+    if(items.length>=limit)Phys.remove(items.shift());
+    Phys.prime(x,z,0);
+    const item=Phys.spawn(kind,x,y,z);
+    if(!item)return;
+    item.b.setAngvel({x:Math.random()*2-1,y:Math.random()*2-1,z:Math.random()*2-1},true);
+    count++;items.push(item);
+  }
+  function step(camera,dt){
+    Modes.MODES.free.step(camera,dt);
+    if(!Phys.ready)return '통+돌 랜덤 낙하 · 물리 엔진을 불러오지 못했습니다';
+    if(!Phys.hold&&dt>0){
+      delay-=dt;if(delay<=0){drop(camera);delay=.5+Math.random()*.9;}
+    }
+    return '통+돌 랜덤 낙하 · '+count+'개 · WASD 이동 · 끌어서 둘러보기';
+  }
+  function leave(){for(const e of items)Phys.remove(e);items.length=0;}
+  Modes.add('collect',{name:'통+돌 랜덤 낙하',enter,step,leave},'Digit0','0');
+  return {get count(){return count;}};
 })();

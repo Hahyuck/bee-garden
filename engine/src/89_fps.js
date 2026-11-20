@@ -217,7 +217,7 @@ const PulseRange = (() => {
     reloadCell();
   });
   addEventListener('keydown',e=>{
-    if(!active||e.target.closest?.('dialog[open]'))return;
+    if(!active||e.target.closest?.('dialog[open],#world-bar,#game-composer'))return;
     if(e.key==='Escape'||e.code==='Escape'){e.preventDefault();e.stopImmediatePropagation();pause();return;}
     if(paused&&!e.target.closest?.('input,select,textarea,button,[contenteditable="true"]')&&
       /^(Key[WASDCRFGX]|Arrow\w+|Shift(Left|Right)|Space)$/.test(e.code))e.stopImmediatePropagation();

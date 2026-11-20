@@ -29,7 +29,7 @@ const Weather = (() => {
       'uniform float uLum; varying float vA; void main(){ float a = smoothstep(.5, .15, length(gl_PointCoord - .5)) * vA; if (a < .01) discard; gl_FragColor = vec4(vec3(.82, .86, .92) * uLum, a * .85); }');
     [drops, DU] = cloud(scene, C.drops, C.dropBox, head + 'vec3 p = s * uBox + uDrift * (.85 + .3 * fract(s.z * 13.));' + wrap + 'gl_PointSize = min(uPx * .5 / max(d, .4), 46.); }',
       'uniform float uLum; varying float vA; void main(){ vec2 c = gl_PointCoord - .5; float a = smoothstep(.03, 0., abs(c.x + c.y * .12)) * smoothstep(.5, .3, abs(c.y)) * vA; if (a < .01) discard; gl_FragColor = vec4(vec3(.7, .76, .84) * uLum, a * .32); }');
-    chip = document.createElement('div'); chip.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);font:600 12px/1.4 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;text-shadow:0 1px 8px rgba(0,0,0,.85);z-index:5;pointer-events:none;white-space:pre;font-variant-numeric:tabular-nums;opacity:.9'; document.body.appendChild(chip);
+    chip = document.createElement('div'); chip.id='world-weather'; chip.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);font:600 12px/1.4 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;text-shadow:0 1px 8px rgba(0,0,0,.85);z-index:5;pointer-events:none;white-space:pre;font-variant-numeric:tabular-nums;opacity:.9'; document.body.appendChild(chip);
     G.tick.push(tick); }
 
   function tick(t, dt) { dt = Math.min(dt || 0, .1); const cold = S.mode === 'snow' || S.mode === 'frost', ease = (k, to, s) => { S[k] += (to - S[k]) * (1 - Math.exp(-dt / s)); };

@@ -6,7 +6,7 @@
 const Drive = (() => {
   const RD = Island.RD, V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), YAX = V(0, 1, 0);
   const CC = CFG.car, COMY = CC.comY, M = CC.mass, IX = CC.inertia[0], IY = CC.inertia[1], IZ = CC.inertia[2], RAD = CC.wheelRadius, REST = CC.springRest, TRAV = CC.springTravel, KS = CC.spring, CS = CC.damper, G9 = 9.81;
-  const WL = [[.74, -.18, 1.22], [-.74, -.18, 1.22], [.74, -.18, -1.18], [-.74, -.18, -1.18]].map(a => V(...a));      // +X is the car's left, +Z its nose
+  const WL = [[.74, -.08, 1.22], [-.74, -.08, 1.22], [.74, -.08, -1.18], [-.74, -.08, -1.18]].map(a => V(...a));      // +X is the car's left, +Z its nose
   const MU = CC.grip, RR = CC.rolling, GEAR = CC.gears, FINAL = CC.finalDrive, REV = CC.reverse; let snowK = 0, iceK = 0;
   const car = { p: V(), q: new THREE.Quaternion(), v: V(), w: V(), comp: [0, 0, 0, 0], len: [.2, .2, .2, .2], spin: [0, 0, 0, 0], steer: 0, gear: 1, rpm: 900, slip: 0, thr: 0, air: 0, surf: 0, bad: 0 };
   const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
@@ -18,7 +18,18 @@ const Drive = (() => {
   let body = null, hitT = 0; const tr0 = [V(), V()], tr1 = V(); let trOn = [false, false]; const vPrev = V(), cm = V(), _i = { x: 0, y: 0, z: 0 };
   let grp = null, wheels = [], on = false, paused = false, camMode = 0, hud, menu, lastI = 0, camInit = false, snd = null, drive = 0, brake = 0, shiftT = 0, wet = 0, pad = [false, false, false];
   function reset(i) { const n = RD.n; i = ((i % n) + n) % n; const j = (i + 1) % n;
-    car.p.set(RD.px[i], Island.support(RD.px[i],RD.pz[i]) + .69, RD.pz[i]); car.q.setFromAxisAngle(YAX, Math.atan2(RD.px[j] - RD.px[i], RD.pz[j] - RD.pz[i])); car.v.set(0, 0, 0); car.w.set(0, 0, 0); car.comp.fill(.09); car.gear = 1; car.rpm = 900; car.bad = 0; car.steer = 0; car.slip = 0; shiftT = 0; camInit = false; lastI = i; vPrev.set(0, 0, 0);
+    car.p.set(RD.px[i], 0, RD.pz[i]);
+    bz.set(RD.px[j]-car.p.x,0,RD.pz[j]-car.p.z).normalize();bx.crossVectors(YAX,bz);
+    const floor=WL.map(w=>Island.support(car.p.x+bx.x*w.x+bz.x*w.z,car.p.z+bx.z*w.x+bz.z*w.z));
+    const across=(floor[0]+floor[2]-floor[1]-floor[3])/(2*(WL[0].x-WL[1].x));
+    const along=(floor[0]+floor[1]-floor[2]-floor[3])/(2*(WL[0].z-WL[2].z));
+    bx.y=across;bz.y=along;bz.normalize();by.crossVectors(bz,bx).normalize();bx.crossVectors(by,bz).normalize();
+    car.q.setFromRotationMatrix(mm.makeBasis(bx,by,bz));
+    const preload=M*G9*by.y/(4*KS);
+    car.p.y=floor.reduce((sum,y)=>sum+y,0)/4-along*(WL[0].z+WL[2].z)/2+(RAD+REST-preload-WL[0].y)/by.y;
+    sampleGround();
+    for(let k=0;k<4;k++){const len=wheelLength(k);car.comp[k]=Math.max(0,REST-len);}
+    car.v.set(0, 0, 0); car.w.set(0, 0, 0); car.gear = 1; car.rpm = 900; car.bad = 0; car.steer = 0; car.slip = 0; shiftT = 0; camInit = false; lastI = i; vPrev.set(0, 0, 0);
     if (body) { Phys.prime(car.p.x, car.p.z); body.setTranslation(car.p, true); body.setRotation(car.q, true); body.setLinvel({ x: 0, y: 0, z: 0 }, true); body.setAngvel({ x: 0, y: 0, z: 0 }, true); } }
   const pull = () => { const t = body.translation(), q = body.rotation(), v = body.linvel(), w = body.angvel(); car.p.set(t.x, t.y, t.z); car.q.set(q.x, q.y, q.z, q.w); car.v.set(v.x, v.y, v.z); car.w.set(w.x, w.y, w.z); };
   // the car as a body in the world's physics: mass, a low centre of mass, inertia, and a hull that can hit things. The wheels stay ours:
@@ -77,6 +88,7 @@ const Drive = (() => {
       bxm(.32,.105,.05,side*.56,-.025,1.974,lamp);
     }
     bxm(.46,.135,.03,0,-.11,-1.977,wax);
+    ext([[-1.94,-.31],[-1.88,-.43],[-1.64,-.44],[-1.50,-.34]],1.49,trim,.025);
     bxm(.78,.14,.045,0,-.12,1.98,trim);
     bxm(1.36,.055,.18,0,.75,-1.31,paint);
     bxm(1.66, .16, .14, 0, -.31, 1.9, trim); bxm(1.66, .16, .14, 0, -.31, -1.9, trim); bxm(.7, .1, .04, 0, -.14, 1.925, trim);
@@ -122,10 +134,38 @@ const Drive = (() => {
     car.v.x*=topSpeed/speed; car.v.z*=topSpeed/speed;
     if(body)body.setLinvel(car.v,true);
   }
+  function sampleGround(){
+    for(let i=0;i<4;i++){
+      A.copy(WL[i]).applyQuaternion(car.q).add(car.p);
+      const g=gnd[i],[y,type]=Island.surf(A.x,A.z);
+      g[0]=y;g[1]=(Island.support(A.x+.4,A.z)-y)/.4;g[2]=(Island.support(A.x,A.z+.4)-y)/.4;
+      g[3]=A.x;g[4]=A.z;g[5]=type;if(i===0)car.surf=type;
+    }
+  }
+  function wheelLength(i){
+    const g=gnd[i];A.copy(WL[i]).applyQuaternion(car.q).add(car.p);
+    const floor=g[0]+g[1]*(A.x-g[3])+g[2]*(A.z-g[4]);
+    const slope=by.y-g[1]*by.x-g[2]*by.z;
+    const len=(A.y-floor-RAD*Math.hypot(1,g[1],g[2]))/Math.max(.35,slope);
+    car.len[i]=clamp(len,REST-TRAV-.04,REST+.06);
+    return len;
+  }
+  function drawCar(){
+    grp.position.copy(car.p);grp.quaternion.copy(car.q);
+    by.set(0,1,0).applyQuaternion(car.q);
+    for(let i=0;i<4;i++){
+      wheelLength(i);
+      const w=wheels[i];w.position.copy(WL[i]);w.position.y-=car.len[i];
+      w.rotation.set(car.spin[i],i<2?car.steer:0,0);
+      const contact=CarGroundShade.tyres[i];
+      contact.copy(w.position).applyQuaternion(car.q).add(car.p);contact.y-=RAD;
+    }
+    bz.set(0,0,1).applyQuaternion(car.q);
+    CarGroundShade.setPose(car.p,bz);
+  }
   function sub(h) {
     if (body) pull(); const q = car.q; bx.set(1, 0, 0).applyQuaternion(q); by.set(0, 1, 0).applyQuaternion(q); bz.set(0, 0, 1).applyQuaternion(q); F.set(0, body ? 0 : -M * G9, 0); cm.copy(car.p).addScaledVector(by, body ? COMY : 0); Tq.set(0, 0, 0); let slip = 0, air = 0;
-    for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z);
-      const gy = g[0] + g[1] * (A.x - g[3]) + g[2] * (A.z - g[4]), len = (A.y - gy - RAD) / Math.max(by.y, .35); car.len[i] = clamp(len, REST - TRAV - .04, REST + .06);
+    for (let i = 0; i < 4; i++) { const g = gnd[i], len=wheelLength(i);
       if (len > REST) { car.comp[i] = 0; air++; continue; }
       const c = Math.min(REST - len, TRAV + .08); let Fz = KS * c + CS * (c - car.comp[i]) / h; if (c > TRAV) Fz += 90000 * (c - TRAV); car.comp[i] = c; if (Fz <= 0) continue; Fz = Math.min(Fz, 4 * M * G9);
       nrm.set(-g[1], 1, -g[2]).normalize(); C.copy(A).addScaledVector(by, -(len + RAD)); r.subVectors(C, cm); vC.copy(car.w).cross(r).add(car.v);
@@ -164,14 +204,13 @@ const Drive = (() => {
     if (!grp) return ''; readInput();
     if (!paused) { const te = G.tEnv === undefined ? G.t : G.tEnv; wet = sm(31.2, 36, te) * (1 - sm(68, 76, te)); if (typeof Weather !== 'undefined') { wet = Weather.S.wet; snowK = Weather.S.cover; iceK = Weather.S.ice; }
       if (body) { pull(); limitSpeed(); } bx.set(1, 0, 0).applyQuaternion(car.q); by.set(0, 1, 0).applyQuaternion(car.q); bz.set(0, 0, 1).applyQuaternion(car.q); control(dt);
-      for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z); const s0 = Island.surf(A.x, A.z), y0 = s0[0], ty = s0[1];
-        g[0] = y0; g[1] = (Island.surf(A.x + .4, A.z)[0] - y0) / .4; g[2] = (Island.surf(A.x, A.z + .4)[0] - y0) / .4; g[3] = A.x; g[4] = A.z; g[5] = ty; if (i === 0) car.surf = ty; }
+      sampleGround();
       if (!body && dt > 0) { const n = clamp(Math.ceil(dt * 240), 1, 12), h = dt / n; for (let i = 0; i < n; i++) sub(h); }
       const road = Island.nearRoad(car.p.x, car.p.z); car.off = road.d; if(road.d < 60) lastI = road.i;
       if (body) { hitT -= dt; const dv = tmp.copy(car.v).sub(vPrev).length(); vPrev.copy(car.v); if (dv > 2.2 && hitT <= 0) { Phys.thump(Math.min(1, dv / 9)); hitT = .22; } }      // a jolt in the velocity is a hit: let it be heard
       const sunk = car.p.y < .6 && Island.surf(car.p.x, car.p.z)[0] < -.6; car.bad = by.y < .3 || (!body && car.p.y < -1.2) ? car.bad + dt : sunk ? car.bad + dt * .4 : 0; if (car.bad > 1.6 || !isFinite(car.p.x) || car.p.y < -6) back(); }
     brakeLight.emissiveIntensity=inp.brk || inp.hb ? 3.2 : .64;
-    grp.position.copy(car.p); grp.quaternion.copy(car.q); wheels.forEach((w, i) => { w.position.set(WL[i].x, WL[i].y - car.len[i], WL[i].z); w.rotation.set(car.spin[i], i < 2 ? car.steer : 0, 0); });
+    drawCar();
     if (typeof FX !== 'undefined' && !paused) for (let k = 0; k < 2; k++) { const i = k + 2, sv = car.v.length(), loose = car.surf !== 0 ? 1 : 0, spray = snowK > .25 || wet > .5 ? 1 : 0, slide = car.slip > .45 ? 1 : 0, emit = car.comp[i] > 0 && sv > 4 && (loose || spray || slide);
       tr1.copy(car.p).addScaledVector(bx, WL[i].x).addScaledVector(by, WL[i].y - car.len[i] - RAD + .12).addScaledVector(bz, WL[i].z - .25);
       if (emit && trOn[k] && tr1.distanceToSquared(tr0[k]) > .16) { FX.trail(tr0[k].clone(), tr1.clone(), (.16 + .1 * Math.min(1, sv / 20)) * (spray ? 1.3 : 1), spray || (slide && !loose) ? 1 : 0); tr0[k].copy(tr1); } else if (!trOn[k] || !emit) tr0[k].copy(tr1); trOn[k] = emit; }
@@ -188,21 +227,15 @@ const Drive = (() => {
   }
   function enter() { on = true; grp.visible = true; if (body) { body.setEnabled(true); Phys.prime(car.p.x, car.p.z); } hud.style.display = ''; camInit = false; }
   function park() {
-    reset(RD.n-6); grp.visible = true; grp.position.copy(car.p); grp.quaternion.copy(car.q);
-    for (let i=0;i<wheels.length;i++) {
-      const anchor=tmp.copy(WL[i]).applyQuaternion(car.q).add(car.p);
-      car.len[i]=anchor.y-Island.support(anchor.x,anchor.z)-RAD;
-      wheels[i].position.set(WL[i].x,WL[i].y-car.len[i],WL[i].z);
-      wheels[i].rotation.set(0,0,0);
-    }
-    doorHinge.rotation.y=0; car.spin.fill(0); hitT=0; trOn.fill(false); drive=brake=0; pedalWasDown=false; car.drifting=false;
+    reset(RD.n-6); grp.visible = true;car.spin.fill(0);drawCar();
+    doorHinge.rotation.y=0; hitT=0; trOn.fill(false); drive=brake=0; pedalWasDown=false; car.drifting=false;
   }
   function finish() {
     on=false; if(body) body.setEnabled(false);
     hud.style.display='none'; setPaused(false); Modes.keys.clear();
     Object.assign(touch,{acc:0,brk:0,st:0,hb:0}); sound();
   }
-  function leave() { finish(); grp.visible=false; doorHinge.rotation.y=0; }
+  function leave() { finish(); grp.visible=false; CarGroundShade.hide(); doorHinge.rotation.y=0; }
   addEventListener('keydown', e => { if (!on || e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.('input,select,textarea,button,dialog[open]')) return;
     if (e.code === 'KeyC' && !e.repeat) { camMode = (camMode + 1) % 3; camInit = false; } else if (e.code === 'KeyR' && !e.repeat) back(); else if (e.code === 'Escape') setPaused(!paused);
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); });
