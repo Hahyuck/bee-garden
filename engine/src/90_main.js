@@ -18,6 +18,7 @@
     ['바다 밑', 1, async () => Sea.bake()],
     ['정원', 10, async p => Garden.build(scene, p, tick)],
     ['빛 필드', 1, async () => LightField.build()],
+    ['지표의 바람', 1, async () => GroundWind.build(scene)],
     ['효과', 1, async () => FX.build(scene)],
     ['물리', 3, async () => Phys.init(scene)],
     ['차', 1, async () => Drive.build(scene)],

@@ -1,8 +1,16 @@
 # garden engine — 벌의 정원 방식으로 세운 독립 엔진
 
-벌의 정원의 표현 방식(코드로 그린 재질, 하늘 함수, 심도·블룸·ACES 필름)을 기준으로, 고쳐 가며 쓰는 엔진 형태로 정리한 것입니다. `world/`와 달리 Crimson Loong의 코드가 한 줄도 들어 있지 않습니다. 모든 층이 직접 쓴 코드이고, 외부 것은 three.js(MIT)와 Rapier(Apache-2.0)뿐입니다.
+벌의 정원의 하늘·날씨·카메라를 토대로 만든 브라우저용 월드 엔진입니다. Three.js와 Rapier 위에서 지형을 생성하고, 실측한 암석·흙 재질과 뼈대가 있는 캐릭터를 같은 빛으로 그립니다.
 
 **사용 안내: [GUIDE.md](GUIDE.md)** — 실행하고 고치기, 세계 바꾸기, 물리와 효과, 게임 규칙 넣기, 게임 엔진으로 활용하는 방법을 예시와 함께 정리했습니다. `0` 키의 "통 모으기"가 그 예시 게임입니다(`src/89_example_collect.js`).
+
+자유 비행은 해안 정원의 바위 앞에서 시작합니다. 옆면에는 갈라진 암반의 결이 이어지고, 아래로 내려가면 흙에 파묻힌 자갈이 보입니다. [오후의 해안 정원](https://hahyuck.github.io/bee-garden/engine/?day=16.15&still&weather=clear) · [사람과 동물 보행 테스트](https://hahyuck.github.io/bee-garden/engine/?mode=actors&day=16&weather=clear)
+
+### 재질과 모델의 출처
+
+바위·갓길·흙에는 Poly Haven의 CC0 스캔 네 종을 사용했습니다. 색상과 표면 정보를 각기 한 장에 묶고, 표면 정보에는 OpenGL 노멀의 두 축, 거칠기, 상대 높이를 저장했습니다. [Rock Boulder Cracked](https://polyhaven.com/a/rock_boulder_cracked) · [Rock Ground 02](https://polyhaven.com/a/rock_ground_02) · [Brown Mud 02](https://polyhaven.com/a/brown_mud_02) · [Rock Face 03](https://polyhaven.com/a/rock_face_03) · [Poly Haven 라이선스](https://polyhaven.com/license)
+
+보행 테스트에는 Polygonal Mind의 VRChat 컬렉션에서 CC0로 공개한 Kate와 Froggy를 사용했습니다. 원본 VRM의 메시·스킨·텍스처를 웹용 GLB로 정리하고 걷기와 도약 동작을 제작했습니다. Froggy는 원작의 의인화된 개구리입니다. 로더는 Three.js r180의 MIT 라이선스 GLTFLoader와 BufferGeometryUtils에 기반합니다. [Kate 원본](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_038) · [Froggy 원본](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_010) · [Three.js GLTFLoader](https://github.com/mrdoob/three.js/blob/r180/examples/jsm/loaders/GLTFLoader.js)
 
 ## 실행
 
@@ -13,13 +21,14 @@ python -m http.server 8765
 - `engine/dev.html` — 소스 파일을 하나씩 불러옵니다. 고치고 새로고침하면 반영됩니다.
 - `engine/index.html` — 한 파일로 합친 배포용. `python tools/build.py`로 다시 만듭니다(Windows는 `PYTHONUTF8=1`).
 
-주소 옵션: `?mode=free|bee|hike|drive`, `?weather=clear|rain|snow|frost|auto`, `?day=17.5`(시각), `?still`(시간 멈춤), `?low`, `?cam=x,y,z,tx,ty,tz`.
+주소 옵션: `?mode=free|bee|hike|drive|actors`, `?weather=clear|rain|snow|frost|auto`, `?day=17.5`(시각), `?still`(시간 멈춤), `?low`, `?cam=x,y,z,tx,ty,tz`.
 
 ## 조작
 
 | 키 | 동작 |
 |---|---|
 | `1` `2` `3` `4` | 자유 비행 · 벌 · 산행 · 운전 |
+| `V` | 정원에서 사람과 개구리의 보행·도약 보기. 화면을 끌면 시점을 돌릴 수 있습니다. |
 | `5` `6` `7` `8` `9` | 맑음 · 비 · 눈 · 혹한 · 자동 날씨 |
 | `[` `]` / `T` | 시각을 한 시간씩 옮기기 / 시간 흐름 멈춤 |
 | `F` `G` `X` | 돌 던지기 · 벌통 상자 놓기 · 폭발 |
@@ -48,6 +57,7 @@ python -m http.server 8765
 | `12_sea.js` | 바다. 여섯 겹의 너울, 깊이를 아는 물빛(얕은 곳은 모래가 비치고 깊은 곳은 짙어짐), 하늘 반사, 윤슬, 파도 등으로 비쳐 드는 빛, 물가를 오르내리는 포말, 혹한의 해빙 |
 | `40_fxkit.js` | 절차적 지오메트리와 유기 재질 하나(잎, 꽃잎, 털, 나무껍질, 돌 …) |
 | `41_weather.js` | 날씨 상태: 기온, 바람, 구름, 비, 눈, 적설, 빙결, 젖음 |
+| `41_geology.js` · `81_groundwind.js` | 암석의 표면 방향·경사에 따라 광물, 흙, 자갈을 혼합하고, 마른 노면과 오솔길에서 풍속을 따라 먼지를 띄웁니다. |
 | `42_island.js` `44_garden.js` | 섬(높이 함수, 도로, 등산로, 숲)과 정원(잔디, 꽃, 벌집, 고양이, 벌) |
 | `46_lightfield.js` | 빛 필드: 섬을 위에서 본 지도 한 장으로 숲 아래의 하늘빛 가림과, 해 받은 숲이 옆으로 되돌려 주는 빛을 계산. 폭발 같은 뜨거운 점광도 여기서 |
 | `79_contact.js` · `80_post.js` | 깊이 기반 접촉 음영, 어안 렌즈, 자동 초점, 겹눈, 접사 심도, 블룸, 빛기둥, 열 아지랑이, 노출 적응, 비네트, ACES, 그레인 |
@@ -55,6 +65,7 @@ python -m http.server 8765
 | `85_phys.js` | 강체 세계(Rapier): 지면, 나무, 바위, 느슨한 물체, 부력, 바람, 폭발 |
 | `86_audio.js` | 소리 출력과 바람·파도·빗소리(합성) |
 | `87_drive.js` | 차 |
+| `89_vr_actors.js` | GLB 뼈대 모델과 애니메이션을 불러와 지형을 따라 움직입니다. |
 | `88_modes.js` | 보는 방식(모드)과 그림자 범위 |
 | `90_main.js` | 빌드 순서와 프레임 루프 |
 | `91_guide.js` | 화면 안 안내서(`H`): 다섯 항목, 예시마다 코드와 `해보기` 버튼 |

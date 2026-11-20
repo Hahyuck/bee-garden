@@ -8,6 +8,13 @@ const Modes = (() => {
   const dbg = Q.get('cam') ? Q.get('cam').split(',').map(Number) : null, sn = (t, s) => (Math.sin(1.7 * t + s) + .6 * Math.sin(3.1 * t + 2.3 * s) + .3 * Math.sin(5.9 * t + 4.1 * s)) / 1.9;
   // free flight: W A S D, Q and E down and up, Shift fast, drag to look. It cannot go under the ground.
   const fly = { p: new THREE.Vector3(GP.x + 16, GP.y + 7, GP.z + 26), yaw: Math.atan2(16, 26), pitch: -.18, drag: false };
+  function visitOutcrop() {
+    set('free');
+    const x=GP.x+9, z=GP.z+4, tx=GP.x+4, tz=GP.z+20;
+    fly.p.set(x,Island.surf(x,z)[0]+1.75,z);
+    fly.yaw=Math.atan2(x-tx,z-tz);
+    fly.pitch=Math.atan2(Island.surf(tx,tz)[0]+3.1-fly.p.y,Math.hypot(tx-x,tz-z));
+  }
   addEventListener('pointerdown', e => { if (e.target.tagName === 'CANVAS') fly.drag = true; }); addEventListener('pointerup', () => { fly.drag = false; });
   addEventListener('pointermove', e => { if (!fly.drag || cur !== 'free') return; fly.yaw -= e.movementX * .0032; fly.pitch = clamp(fly.pitch - e.movementY * .0032, -1.45, 1.45); });
   // the walk: eye height above the trail, steps from the distance walked, the gaze along the path ahead
@@ -40,7 +47,7 @@ const Modes = (() => {
     sun.target.position.copy(c); sun.position.copy(c).addScaledVector(S, p[1]); sun.target.updateMatrixWorld(); sun.updateMatrixWorld(); }
   // add(id, mode, keyCode, keyLabel): a module brings its own mode, e.g. Modes.add('collect', {...}, 'Digit0', '0')
   const extra = {}; function add(id, mode, code, label) { MODES[id] = mode; if (code) { extra[code] = id; mode.key = label || code; } }
-  function step(camera, dt) { if (!booted) { booted = true; const want = Q.get('mode'); if (MODES[want]) cur = want; MODES[cur].enter(); }
+  function step(camera, dt) { if (!booted) { booted = true; const want = Q.get('mode'); if (MODES[want]) cur = want; MODES[cur].enter(); if (cur==='free') visitOutcrop(); }
     camera.near = .3; Post.lens.aperture = 0; Post.lens.focus = 10; Post.lens.fisheye = false; if (cur !== 'bee') Post.lens.eye = 0; let line;
     const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); camera.fov = fix[6] || CC.fov; camera.near = fix[7] || .3; line = ''; }
     else line = MODES[cur].step(camera, dt);
@@ -48,5 +55,5 @@ const Modes = (() => {
     if (performance.now() - hudAt > 250) { hudAt = performance.now(); hud.textContent = Object.keys(MODES).map((k, i) => (k === cur ? '▸' : ' ') + (MODES[k].key || i + 1) + ' ' + MODES[k].name).join('   ') + '   H 엔진 활용법\n' + line; } }
   addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); if (e.code === 'KeyB' && !e.repeat && cur === 'bee') eyeOn = !eyeOn; const i = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code); if (i >= 0) set(Object.keys(MODES)[i]); else if (extra[e.code]) set(extra[e.code]); if (cur === 'hike' && e.code.startsWith('Arrow')) e.preventDefault(); });
   addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
-  return { step, set, add, MODES, fly, keys, get cur() { return cur; } };
+  return { step, set, add, visitOutcrop, MODES, fly, keys, get cur() { return cur; } };
 })();

@@ -6,7 +6,7 @@
 
 The app JS is syntax-checked with `node --check` first; a syntax error stops the build and names the module.
 """
-import glob, os, re, subprocess, sys, tempfile
+import base64, glob, json, os, re, subprocess, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WS = sys.argv[1] if len(sys.argv) > 1 else None
 BASE = os.path.join(ROOT, "ws", WS) if WS else ROOT
@@ -47,13 +47,33 @@ with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as tf: tf.writ
 r = subprocess.run(["node", "--check", tf.name], capture_output=True, text=True); os.unlink(tf.name)
 if r.returncode != 0:
     print("SYNTAX ERROR in the joined app (usually the same top-level name declared in two modules):\n" + r.stderr.strip()[:1500]); sys.exit(1)
+geology = {"albedo": "assets/geology/geology-albedo.jpg", "detail": "assets/geology/geology-detail.png"}
+actors = {"human": "assets/actors/kate.glb", "frog": "assets/actors/animal.glb"}
+def embed_map(path):
+    source = os.path.join(BASE, path)
+    if not os.path.isfile(source):
+        source = os.path.join(ROOT, path)
+    with open(source, "rb") as asset:
+        encoded = base64.b64encode(asset.read()).decode("ascii")
+    mime = {".jpg": "image/jpeg", ".png": "image/png", ".glb": "model/gltf-binary"}[os.path.splitext(path)[1]]
+    return f"data:{mime};base64,{encoded}"
+
 out = shell.replace("{{THREE}}", three).replace("{{APP}}", joined)
+if "{{GEOLOGY_MAPS}}" in out:
+    out = out.replace("{{GEOLOGY_MAPS}}", json.dumps({k: embed_map(path) for k, path in geology.items()}))
+if "{{ACTOR_MODELS}}" in out:
+    with open(os.path.join(V, "gltf-loader-r180.js"), encoding="utf-8") as loader_file:
+        out = out.replace("{{ACTOR_LOADER}}", "<script>" + loader_file.read() + "</script>")
+    out = out.replace("{{ACTOR_MODELS}}", json.dumps({k: embed_map(path) for k, path in actors.items()}))
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 tmp = OUT + ".tmp"; open(tmp, "w").write(out); os.replace(tmp, OUT)
 print(f"built {os.path.relpath(OUT, ROOT)} {len(out)/1024:.0f} KB ({len(app)} modules)")
 if not WS:
     names = [os.path.basename(f) for f in sorted(glob.glob(os.path.join(SRC, "*.js")))]
     loader = ("import('./vendor/three.module.min.js').then(async T => { window.THREE = T; for (const f of " + repr(names) + ") await new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'src/' + f + '?' + Date.now(); s.onload = ok; s.onerror = () => no(new Error('could not load ' + f)); document.head.appendChild(s); }); });")
-    open(os.path.join(ROOT, "dev.html"), "w", encoding="utf-8").write(shell.replace("<script>{{THREE}}</script>", "").replace("{{APP}}", loader))
+    dev = shell.replace("<script>{{THREE}}</script>", "").replace("{{APP}}", loader)
+    dev = dev.replace("{{GEOLOGY_MAPS}}", json.dumps(geology)).replace("{{ACTOR_MODELS}}", json.dumps(actors))
+    dev = dev.replace("{{ACTOR_LOADER}}", '<script src="vendor/gltf-loader-r180.js"></script>')
+    open(os.path.join(ROOT, "dev.html"), "w", encoding="utf-8").write(dev)
     open(os.path.join(ROOT, "index.html"), "w", encoding="utf-8").write(out)
     print(f"wrote index.html (one file, for release) and dev.html (loads src/*.js one by one, for editing)")

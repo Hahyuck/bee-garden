@@ -69,7 +69,27 @@ const FXKit = (() => {
   // ---- the surface library (fragment). Material ids:
   //  0 plain  1 leaf (veins)  2 petal (streaks, nectar guide)  3 grass blade  4 timber  5 insect fuzz  6 fur (tabby)  7 stone  8 florets / pollen
   //  9 glossy  10 honeycomb  15 cat's eye  17 striped fuzz  19 bark  22 needle-bearing branch (cut out)  23 conifer bough tier (ragged rim, cut out)  24 far conifer (outline drawn on a card)  26 fern (cut out)
-  const FRAG = /* glsl */`
+  // Share shoot cutouts with the shadow pass so that sunlight can reach the forest floor.
+  const coniferMask = /* glsl */`
+bool openNeedles(int m, vec2 uv, vec3 p) {
+  float v=uv.y;
+  if(m==22) {
+    float u=abs(uv.x-.5)*2.;
+    float tw=abs(fract(v*34.+u*3.2+p.y*.7)-.5);
+    float leaf=step(tw,.2+.16*vnoise3(vec3(uv*vec2(9.,70.),p.y)))*step(u,1.-.35*v);
+    leaf*=step(.3,vnoise3(vec3(uv.x*5.,v*4.,p.y*3.1))+.25*(1.-u));
+    return max(leaf,step(u,.07))<.5;
+  }
+  if(m==23) {
+    float seed=vnoise3(vec3(uv.x*70.,p.y*2.,uv.x*17.));
+    float ribs=uv.x*10.+vnoise3(vec3(p.y*1.7,uv.x*3.,1.))*.6;
+    float gap=abs(fract(ribs)-.5);
+    float tip=.56+.37*seed+.08*cos(ribs*6.283);
+    return v>tip || (gap>.44+.04*seed-.105*smoothstep(.23,.88,v) && v>.27);
+  }
+  return false;
+}`;
+  const FRAG = coniferMask + /* glsl */`
 varying float vM, vH; varying vec3 vWp, vOp; varying vec2 vFxUv;
 uniform float uGuide, uPupil;
 float fxTrans, fxRough, fxAO;
@@ -96,12 +116,15 @@ vec3 fxSurface(vec3 alb){
     float slit=uPupil*sqrt(max(0.,1.-pow(p.y/.66,2.))); alb=p.z>0.&&r<.8?iris:vec3(.05,.035,.03);
     alb=mix(alb,vec3(.01),smoothstep(.72,.8,r)*step(0.,p.z)); if(p.z>0.&&abs(p.x)<slit) alb=vec3(.004); fxRough=.05; }
   else if(m==19){ alb*=.45+vnoise3(vec3(vOp.x*14.,vOp.y*1.3,vOp.z*14.)); fxRough=.95; }
-  else if(m==22){ float u=abs(uv.x-.5)*2., v=uv.y; float tw=abs(fract(v*34.+u*3.2+vOp.y*.7)-.5);
-    float a=step(tw,.2+.16*vnoise3(vec3(uv*vec2(9.,70.),vOp.y)))*step(u,1.-.35*v); a*=step(.3,vnoise3(vec3(uv.x*5.,v*4.,vOp.y*3.1))+.25*(1.-u)); a=max(a,step(u,.07));
-    if(a<.5) discard; alb*=mix(.5,1.15,u)*(.75+.5*vnoise3(vOp*7.)); fxTrans=.5; fxAO=mix(.4,1.,v); }
-  else if(m==23){ float v=uv.y, fr=vnoise3(vec3(uv.x*70.,vOp.y*2.,uv.x*17.)), bough=abs(fract(uv.x*9.+vnoise3(vec3(vOp.y*1.7,uv.x*3.,1.))*.35)-.5);
-    if(v>.55+.45*fr||(bough>.4+.08*fr&&v>.3)) discard;
-    alb*=mix(.35,1.2,v)*(.7+.6*vnoise3(vec3(uv.x*40.,v*6.,vOp.y))); fxTrans=.4; fxRough=.8; fxAO=mix(.4,1.,v); }
+  else if(m==22 || m==23){
+    if(openNeedles(m,uv,vOp)) discard;
+    float tip=m==22?abs(uv.x-.5)*2.:uv.y;
+    float cluster=vnoise3(vWp*vec3(.65,.92,.65));
+    float young=smoothstep(.38,.92,tip)*(.38+.62*cluster);
+    float lum=dot(alb,vec3(.2126,.7152,.0722));
+    alb=mix(vec3(lum),alb,.76)*mix(vec3(.64,.75,.83),vec3(1.17,1.02,.68),young);
+    alb*=mix(.73,1.16,cluster); fxTrans=mix(.09,.41,young);
+    fxRough=mix(.90,.68,young); fxAO=mix(.54,1.,tip); }
   else if(m==24){ float v=uv.y, x=abs(uv.x-.5)*2., t=fract(v*7.), w=((1.-v)*(1.-.42*t)+.03)*(.82+.36*vnoise3(vec3(uv.x*38.,v*46.,3.)));
     bool trunk=x<.045&&v<.24; if((x>w||v<.13)&&!trunk) discard;
     alb=trunk&&(x>w||v<.13)?vec3(.09,.06,.04):alb*mix(.3,1.1,clamp(x/max(w,.01),0.,1.))*(.7+.6*vnoise3(vec3(uv.x*30.,v*40.,1.))); fxTrans=.3; }
@@ -109,6 +132,23 @@ vec3 fxSurface(vec3 alb){
   return alb*fxAO;
 }`;
   const U = { uGuide: { value: .3 }, uPupil: { value: .1 } };
+  function coniferDepth() {
+    const depth = new THREE.MeshDepthMaterial({depthPacking: THREE.RGBADepthPacking});
+    patch(depth, s => {
+      s.vHead('attribute float aM; varying float treePart; varying vec2 treeUV; varying vec3 treeLocal;\n'+GLSL_WIND);
+      s.v('#include <begin_vertex>', `#include <begin_vertex>
+        treePart=aM; treeUV=uv; treeLocal=position;
+        #ifdef USE_INSTANCING
+          mat4 objectToWorld=modelMatrix*instanceMatrix;
+          float height=max(0.,(objectToWorld*vec4(position,1.)).y-objectToWorld[3].y);
+          mat3 rot=mat3(objectToWorld);
+          transformed+=(clWind(objectToWorld[3].xyz,.02*height*height/(height+10.))*rot)/dot(rot[0],rot[0]);
+        #endif`);
+      s.fHead(GLSL_NOISE+coniferMask+'\nvarying float treePart; varying vec2 treeUV; varying vec3 treeLocal;');
+      s.f('#include <alphatest_fragment>','#include <alphatest_fragment>\nif(openNeedles(int(treePart+.5),treeUV,treeLocal)) discard;');
+    }, 'conifer-depth');
+    return depth;
+  }
   // sway: [amplitude, length scale] in the units of the world (metres). Vertices move with the square of their height above the plant's foot.
   function mat(o = {}) {
     const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, vertexColors: true, side: THREE.DoubleSide, envMapIntensity: .6 });
@@ -158,5 +198,5 @@ float fxHeightFog(vec3 cam, vec3 p, vec3 fog){ vec3 v=p-cam; float d=length(v), 
     macroShadow: /* glsl */`// a mountain's own shadow: march a height map toward the sun with growing steps; soft where the ray just clears a ridge
 float fxMacroShadow(sampler2D tH, vec3 p, vec3 sun, vec2 org, float size){ float s=1., t=30.; for(int i=0;i<18;i++){ vec3 q=p+sun*t; s=min(s,(q.y-textureLod(tH,(q.xz-org)/size,0.).r+12.)*5./t); t*=1.42; } return clamp(s,0.,1.); }`,
   };
-  return { geo: { leaf, tube, sph, M, Md, mul, tag, merge, box, blob, fur, buckets, shLeaf, shPetal, shBlade, shRound }, mat, U, glsl, FRAG };
+  return { geo: { leaf, tube, sph, M, Md, mul, tag, merge, box, blob, fur, buckets, shLeaf, shPetal, shBlade, shRound }, mat, coniferDepth, U, glsl, FRAG };
 })();

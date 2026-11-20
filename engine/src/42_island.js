@@ -24,7 +24,20 @@ const Island = (() => {
     for (const i of [(bi + n - 1) % n, bi]) { const j = (i + 1) % n, ax = RD.px[i], az = RD.pz[i], dx = RD.px[j] - ax, dz = RD.pz[j] - az, t = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)), ex = x - ax - dx * t, ez = z - az - dz * t, d = ex * ex + ez * ez;
       if (d < bd) { bd = d; _r.y = lerp(RD.py[i], RD.py[j], t); _r.i = i; _r.s = (i + t) * 2; _r.off = dx * ez - dz * ex > 0 ? Math.sqrt(d) : -Math.sqrt(d); } }
     _r.d = Math.sqrt(bd); return _r; }
-  function H0(x, z) { let h = Hb(x, z); if (RD.n) { const o = nearRoad(x, z); if (o.d < 12) h = lerp(h, o.y, 1 - sm(4.6, 12, o.d)); } return h; }
+  let trailReady=false;
+  function H0(x, z) {
+    let h=Hb(x,z), shoulder=1;
+    if(RD.n){ const o=nearRoad(x,z); if(o.d<12) h=lerp(h,o.y,1-sm(4.6,12,o.d)); shoulder=sm(7.5,13,o.d); }
+    const dx=x-GP.x,dz=z-GP.z,edge=Math.max(Math.abs(dx),Math.abs(dz));
+    if(!trailReady || edge>29 || h<7.0 || shoulder===0) return h;
+    // Exposed beds in the garden cut. The planes are offset by joints and fade into the foot,
+    // the smooth driving surface and the hiking strip. Physics and planting query this same height.
+    const exposure=shoulder*(1-sm(24,29,edge))*sm(7,13,h)*sm(1.4,5,nearTrail(x,z).d);
+    const section=h+.18*dx-.21*dz+1.25*NZ.n3(dx*.11,1,dz*.12);
+    const band=section/4.4, ph=band-Math.floor(band);
+    const joint=.42+.58*sm(-.45,.18,NZ.n3(dx*.14,section*.048,dz*.091));
+    return h+4.4*(sm(.49,.76,ph)-ph)*.87*exposure*joint;
+  }
   function findRoad() { const N = 720, rad = new Float32Array(N), tmp = new Float32Array(N);
     for (let i = 0; i < N; i++) { const an = i / N * TAU, c = Math.cos(an), s = Math.sin(an); let r = 530; for (; r > 250; r -= 2) if (Hb(IC.x + c * r, IC.z + s * r) >= 7) break; rad[i] = Math.max(r, 408); }
     const smooth = (w, n) => { for (let p = 0; p < n; p++) { for (let i = 0; i < N; i++) { let s = 0; for (let k = -w; k <= w; k++) s += rad[(i + k + N) % N]; tmp[i] = s / (2 * w + 1); } rad.set(tmp); } };
@@ -117,7 +130,16 @@ vec3 rdSurface(){
   col=mix(col,mix(vec3(.72,.045,.035),vec3(.8),step(.5,fract(s/2.))),kb); rdHt+=kb*(.02+.01*sin(a*40.));
   // gravel shoulder
   float sh=smoothstep(3.42,3.6,a)*(1.-kb); vec2 hq=q*9., hi=floor(hq), hf=fract(hq)-.5; float st=length(hf+(hash22(hi)-.5)*.5), id=hash21(hi);
-  vec3 grav=mix(vec3(.16,.15,.13),vec3(.4,.37,.33),id)*(1.-.55*smoothstep(.2,.42,st)); col=mix(col,grav,sh); rdHt=mix(rdHt,.02*(1.-smoothstep(.15,.4,st)),sh); rdRo=mix(rdRo,.95,sh);
+  vec3 grav=mix(vec3(.16,.15,.13),vec3(.4,.37,.33),id)*(1.-.55*smoothstep(.2,.42,st));
+  geoRelief=vec3(0.);
+  vec3 dx=dFdx(vRw),dy=dFdy(vRw);
+  if(sh>.005){
+    GeoLayer aggregate=geoFlat(geoGravel,vRw,.62,dx,dy);
+    grav=mix(grav,aggregate.color,uGeoWeight);
+    geoRelief=aggregate.relief*(.88*sh*uGeoWeight);
+    rdRo=mix(rdRo,aggregate.rough,sh);
+  }
+  col=mix(col,grav,sh); rdHt=mix(rdHt,.004*(1.-smoothstep(.15,.4,st)),sh);
   // Ruts, seams and the lower edge of the crowned road take water before coarse, draining gravel.
   float wheelOffset=(abs(o-line)-.84)/.46;
   float track=exp(-wheelOffset*wheelOffset), gutter=smoothstep(1.9,3.26,a)*(1.-smoothstep(3.36,3.9,a));
@@ -132,13 +154,14 @@ vec3 rdSurface(){
   // the cold: ice whitens the puddles and glazes the rest; snow lies over it all, thinner on the line the tyres keep clear
   float ice=uWx.y*(.3+.7*smoothstep(.50,.85,bed))*(.7+.3*vnoise(q*2.3)); col=mix(col,vec3(.62,.72,.8),ice*.55); rdRo=mix(rdRo,.07,uWx.y*.85);
   col=mix(col,vec3(.86,.89,.94)*(.92+.08*agg),sc); rdRo=mix(rdRo,.72,sc); rdHt=mix(rdHt,.012*vnoise(q*1.7),sc);
+  geoRelief*=(1.-sc)*(1.-wetPool);
   return col; }`;
   function roadMat() { const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .8, metalness: 0, envMapIntensity: 1 });
     patch(m, s => { s.vHead('attribute vec3 aRd; attribute float aDrain; varying float vDrain; varying vec3 vRd, vRw;');
       s.v('#include <begin_vertex>', '#include <begin_vertex>\n  vRd = aRd; vDrain = aDrain; vRw = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-      waterLighting(s,'vRw'); s.fHead(GLSL_NOISE + GLSL_WX + waterShader + ROADF); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = rdSurface();');
+      waterLighting(s,'vRw'); Geology.bind(s); s.fHead(GLSL_NOISE + GLSL_WX + Geology.shader + waterShader + ROADF); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = rdSurface();');
       s.f('#include <roughnessmap_fragment>', 'float roughnessFactor = rdRo;');
-      s.f('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 sp = -vViewPosition, sx = dFdx(sp), sy = dFdy(sp), r1 = cross(sy, normal), r2 = cross(normal, sx); float det = dot(sx, r1), fw = max(length(sx), length(sy));\n    vec3 gr = sign(det) * (dFdx(rdHt) * r1 + dFdy(rdHt) * r2); normal = normalize(abs(det) * normal - gr * (1.0 - smoothstep(0.004, 0.06, fw))); }'); }, 'road');
+      s.f('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 sp = -vViewPosition, sx = dFdx(sp), sy = dFdy(sp), r1 = cross(sy, normal), r2 = cross(normal, sx); float det = dot(sx, r1), fw = max(length(sx), length(sy));\n    vec3 gr = sign(det) * (dFdx(rdHt) * r1 + dFdy(rdHt) * r2); normal = geoNormal(normalize(abs(det) * normal - gr * (1.0 - smoothstep(0.004, 0.06, fw)))); }'); }, 'road');
     return m; }
   function roadMesh(mat) { const OFF = [-6.2, -4.6, -3.9, -3.5, -3.25, -2.4, -1.2, 0, 1.2, 2.4, 3.25, 3.5, 3.9, 4.6, 6.2], C = OFF.length, n = RD.n, pos = new Float32Array((n + 1) * C * 3), rd = new Float32Array((n + 1) * C * 3), drain = new Uint8Array((n + 1) * C), idx = []; let k = 0;
     for (let i = 0; i <= n; i++) { const ii = i % n, a = (ii + n - 1) % n, b = (ii + 1) % n; let tx = RD.px[b] - RD.px[a], tz = RD.pz[b] - RD.pz[a]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
@@ -186,6 +209,12 @@ varying vec3 vIw, vIn; varying float vIp; float isHt, isRo;
 vec2 isVor(vec2 x){ vec2 n=floor(x),f=fract(x); float md=8.,id=0.; for(int j=-1;j<=1;j++) for(int i=-1;i<=1;i++){ vec2 g=vec2(float(i),float(j)); vec2 o=hash22(n+g); vec2 r=g+o-f; float d=dot(r,r); if(d<md){ md=d; id=hash21(n+g+7.); } } return vec2(sqrt(md),id); }
 vec3 isGround(){
   vec2 q=vIw.xz; float alt=vIw.y, sl=1.-normalize(vIn).y, near=smoothstep(110.,12.,length(cameraPosition-vIw));
+  // Inside the fine terrace the trail is sampled into that grid itself. The wider ribbon's
+  // triangles would otherwise bridge individual shelves and appear as triangles on the cut.
+  bool ribbonFragment=vIp>=1.9;
+  vec2 terraceOffset=abs(q-vec2(${GP.x.toFixed(3)},${GP.z.toFixed(3)}));
+  if(ribbonFragment && max(terraceOffset.x,terraceOffset.y)<29.) discard;
+  float pathCover=ribbonFragment?vIp-2.:vIp;
   float n1=fbm2(q*.012), n2=vnoise(q*.9), n3=vnoise(q*6.);
   float tl=${TREELINE}.+(n1-.5)*26., forest=smoothstep(tl+6.,tl-6.,alt)*smoothstep(9.,15.,alt);
   vec3 floorC=mix(mix(vec3(.12,.08,.045),vec3(.07,.05,.03),n2)*(.7+.6*vnoise(q*3.3)),vec3(.075,.17,.04)*(.6+.7*n3),smoothstep(.36,.55,fbm2(q*.22+2.)));
@@ -208,8 +237,38 @@ vec3 isGround(){
   sand=mix(sand,vec3(.92,.95,.97),smoothstep(.16,.0,abs(alt-fl))*(.55+.45*vnoise(q*3.+uTime*.4))*.9);
   alb=mix(alb,sand,beach); isHt=mix(isHt,.012*rip*(1.-wet)+.03*peb,beach); isRo=mix(isRo,mix(.9,.3,wet),beach);
   vec2 vp=isVor(q*7.5+n2*2.); float st=smoothstep(.36,.24,vp.x)*step(.45,vp.y)*near; vec3 dirt=mix(vec3(.25,.19,.13),vec3(.36,.3,.22),n2)*(.8+.4*n3);
-  dirt=mix(dirt,mix(vec3(.3,.29,.28),vec3(.46,.44,.41),fract(vp.y*7.)),st*.75); float pth=smoothstep(.2,.7,vIp);
+  dirt=mix(dirt,mix(vec3(.3,.29,.28),vec3(.46,.44,.41),fract(vp.y*7.)),st*.75); float pth=smoothstep(.2,.7,pathCover);
   isHt=mix(isHt,.02*st+.012*n3,pth); vec3 o=mix(alb,dirt,pth);
+  // Bedrock emerges on exposed slopes; smaller fragments settle into the earth at the foot.
+  vec3 geon=normalize(vIn),dx=dFdx(vIw),dy=dFdy(vIw);
+  float outcrop=max(rk,smoothstep(.068,.29,sl+(n1-.5)*.15));
+  float bank=smoothstep(.028,.14,sl+(n1-.5)*.065);
+  float forestSoil=forest*(.13+.46*smoothstep(.37,.63,fbm2(q*.18+7.)));
+  float earth=max(pth,max(forestSoil,bank))*(1.-beach);
+  float scree=max(beach*smoothstep(1.1,2.7,alt)*smoothstep(.38,.66,n1+.16*(n2-.5)),bank*.87);
+  vec2 patchDir=vIw.xz-vec2(-233.,-268.);
+  float gardenBed=1.-smoothstep(8.,18.,length(patchDir*vec2(.83,1.25)));
+  earth=max(earth,gardenBed*(.36+.62*smoothstep(.20,.72,n2)));
+  scree=max(scree,gardenBed*.68);
+  float exposure=max(outcrop,max(earth,scree))*uGeoWeight;
+  geoRelief=vec3(0.);
+  if(exposure>.006){
+    GeoLayer groundLayer=geoFlat(geoEarth,vIw,.60,dx,dy);
+    if(scree>.018){
+      GeoLayer gravel=geoFlat(geoGravel,vIw,.44,dx,dy);
+      float stones=smoothstep(.16,.74,scree+.84*(gravel.height-groundLayer.height));
+      groundLayer=geoMix(groundLayer,gravel,stones);
+    }
+    if(outcrop>.03){
+      GeoLayer face=geoStone(vIw,geon,dx,dy,.44,0.);
+      float transition=smoothstep(.09,.91,outcrop+.58*(face.height-groundLayer.height));
+      groundLayer=geoMix(groundLayer,face,transition);
+    }
+    o=mix(o,groundLayer.color,exposure);
+    isRo=mix(isRo,groundLayer.rough,exposure);
+    isHt*=1.-.91*exposure;
+    geoRelief=groundLayer.relief*exposure*.86;
+  }
   float wg=uWx.z*(1.-beach*wet); o*=mix(1.,mix(.66,.5,pth),wg); isRo=mix(isRo,mix(.5,.22,pth),wg*.85);                         // wet earth is darker and shines; the path turns to mud
   float fr=uWx.y*(.55+.45*n3); o=mix(o,vec3(.7,.78,.86),fr*.4); isRo=mix(isRo,.3,uWx.y*.6);                                   // hoar frost and glaze
   float sc=wxCover(vIw,1.-sl)*(1.-.9*smoothstep(.9,.1,alt));
@@ -221,14 +280,15 @@ vec3 isGround(){
   float footprint=max(length(dFdx(q)),length(dFdy(q)));
   o*=1.-.43*wetPool; isHt*=1.-.95*wetPool; isRo=mix(isRo,mix(.085,.24,smoothstep(.024,.26,footprint)),wetPool);
   o=mix(o,vec3(.87,.9,.95)*(.9+.1*n2),sc); isRo=mix(isRo,.7,sc); isHt=mix(isHt,.03*n2+.01*n3,sc);     // the sea keeps the water's edge clear
+  geoRelief*=(1.-sc)*(1.-.92*wetPool)*(1.-.70*uWx.y);
   return o; }`;
   function groundMat() { const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .95, metalness: 0, envMapIntensity: .5 });
     patch(m, s => { s.vHead('attribute float aPath, aDrain; varying vec3 vIw, vIn; varying float vIp, vDrain;');
       s.v('#include <begin_vertex>', '#include <begin_vertex>\n  vIw = (modelMatrix * vec4(transformed, 1.0)).xyz; vIn = normalize(mat3(modelMatrix) * normal); vIp = aPath; vDrain = aDrain;');
-      waterLighting(s,'vIw'); s.fHead(GLSL_NOISE + GLSL_WX + waterShader + FRAG); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = isGround();');
+      waterLighting(s,'vIw'); Geology.bind(s); s.fHead(GLSL_NOISE + GLSL_WX + Geology.shader + waterShader + FRAG); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = isGround();');
       s.f('#include <roughnessmap_fragment>', 'float roughnessFactor = isRo;');
       // relief from the procedural height, by screen-space derivatives; it fades out where a pixel is wider than the relief
-      s.f('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 sp = -vViewPosition, sx = dFdx(sp), sy = dFdy(sp), r1 = cross(sy, normal), r2 = cross(normal, sx); float det = dot(sx, r1), fw = max(length(sx), length(sy));\n    vec3 gr = sign(det) * (dFdx(isHt) * r1 + dFdy(isHt) * r2); normal = normalize(abs(det) * normal - gr * (1.0 - smoothstep(0.03, 0.25, fw))); }'); }, 'island');
+      s.f('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 sp = -vViewPosition, sx = dFdx(sp), sy = dFdy(sp), r1 = cross(sy, normal), r2 = cross(normal, sx); float det = dot(sx, r1), fw = max(length(sx), length(sy));\n    vec3 gr = sign(det) * (dFdx(isHt) * r1 + dFdy(isHt) * r2); normal = geoNormal(normalize(abs(det) * normal - gr * (1.0 - smoothstep(0.03, 0.25, fw)))); }'); }, 'island');
     return m; }
   // Compare the slopes to the two neighbours in each direction. A gully keeps water even on a
   // graded trail; the independent normal-based slope gate rules out water clinging to steep rock.
@@ -248,7 +308,9 @@ vec3 isGround(){
     return new THREE.BufferAttribute(values,1,true);
   }
   function gridMesh(x0, z0, w, n, hf, mat, skirt) { const pos = new Float32Array(n * n * 3), pa = new Float32Array(n * n), idx = new Uint32Array((n - 1) * (n - 1) * 6); let q = 0;
-    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const x = x0 + i / (n - 1) * w, z = z0 + j / (n - 1) * w, k = (j * n + i) * 3, e = skirt && (i === 0 || j === 0 || i === n - 1 || j === n - 1); pos[k] = x; pos[k + 1] = hf(x, z) - (e ? .6 : 0); pos[k + 2] = z; }
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const x = x0 + i / (n - 1) * w, z = z0 + j / (n - 1) * w, k = (j * n + i) * 3, e = skirt && (i === 0 || j === 0 || i === n - 1 || j === n - 1); pos[k] = x; pos[k + 1] = hf(x, z) - (e ? .6 : 0); pos[k + 2] = z;
+      if(skirt) pa[k/3]=1-sm(.4,1.05,nearTrail(x,z).d);
+    }
     for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) { const a = j * n + i, b = a + 1, c = a + n, d = c + 1; idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = b; idx[q++] = c; idx[q++] = d; }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPath', new THREE.BufferAttribute(pa, 1)); g.setAttribute('aDrain',terrainDrain(pos,n,n,Math.max(1,Math.round(3*(n-1)/w)))); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
     const m = new THREE.Mesh(g, mat); m.receiveShadow = true; return m; }
@@ -256,7 +318,7 @@ vec3 isGround(){
     const OFF = [0, .33, .66, 1, 1.4, 1.9, 2.5, 3.2, 4.1, 5.2, 6.4, 7.6, 8.4], W = OFF.length - 1, C = 2 * W + 1, n = T.n, pos = new Float32Array(n * C * 3), pa = new Float32Array(n * C), idx = []; let k = 0;
     for (let i = 0; i < n; i++) { const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); let tx = T.px[b] - T.px[a], tz = T.pz[b] - T.pz[a]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
       for (let j = -W; j <= W; j++) { const d = OFF[Math.abs(j)], off = Math.sign(j) * d, x = T.px[i] - tz * off, z = T.pz[i] + tx * off;
-        pos[k * 3] = x; pos[k * 3 + 1] = Math.abs(j) === W ? H0(x, z) - 1 : fineH(x, z, d, T.py[i]); pos[k * 3 + 2] = z; pa[k] = 1 - sm(.4, 1.05, d); k++; }
+        pos[k * 3] = x; pos[k * 3 + 1] = Math.abs(j) === W ? H0(x, z) - 1 : fineH(x, z, d, T.py[i]); pos[k * 3 + 2] = z; pa[k] = 3 - sm(.4, 1.05, d); k++; }
       if (i < n - 1) for (let j = 0; j < C - 1; j++) { const a0 = i * C + j, b0 = a0 + 1, c0 = a0 + C, d0 = c0 + 1; idx.push(a0, b0, c0, b0, d0, c0); } }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPath', new THREE.BufferAttribute(pa, 1)); g.setAttribute('aDrain',terrainDrain(pos,C,n,2)); g.setIndex(idx); g.computeVertexNormals();
     const m = new THREE.Mesh(g, mat); m.receiveShadow = true; return m; }
@@ -289,6 +351,8 @@ vec3 isGround(){
       for (let i = 0; i < count; i++) { const x = (ix + r()) * size, z = (iz + r()) * size, u = r(), h0 = H0(x, z); if (h0 < .7) continue;
         const dg = Math.hypot(x - GP.x, z - GP.z), tl = tlAt(x, z); let pr, pal, sc = 1;
         if (dg < 11.5) continue; if (h0 < 3.2) { pr = h0 > 1.6 ? .07 : 0; pal = GRD; sc = 1.5; } else if (dg < 34 || h0 < 12) { pr = .95; pal = GRL; sc = .8; } else if (h0 < tl - 4) { pr = .55; pal = GRF; sc = .85; } else if (h0 < MEADOW + 6) { pr = 1; pal = GRS; } else { pr = .1; pal = GRS; sc = .7; }
+        const rockBed=Math.hypot((x+233)*.83,(z+268)*1.25);
+        pr*=.13+.87*sm(6,18,rockBed);
         if (u > pr) continue; const o = nearTrail(x, z); if (o.d < .8 || nearRoad(x, z).d < 4.8) continue; const g = grad(x, z); if (g[0] * g[0] + g[1] * g[1] > 1.3) continue;
         const k = scale * sc * (.7 + .7 * r()); m.compose(p.set(x, ground(x, z) - .03, z), q.setFromAxisAngle(YA, r() * TAU), s.set(k, k * (.8 + .5 * r()), k)); im.setMatrixAt(c, m); im.setColorAt(c, col.copy(pal[Math.floor(r() * pal.length)])); c++; }
       im.count = c; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; };
@@ -308,12 +372,13 @@ vec3 isGround(){
     c.t[larch ? 1 : 0].push([x, y, z, rr(0, TAU), s * rr(.9, 1.1), s, Math.floor(R() * 4)]); }
   const _fm = new THREE.Matrix4(), _fq = new THREE.Quaternion(), _fp = new THREE.Vector3(), _fs = new THREE.Vector3(), _fy = new THREE.Vector3(0, 1, 0);
   function buildForest(grp, P, mTree) { FOREST.P = P; let n = 0;
+    const needleDepth = FXKit.coniferDepth();
     for (const c of FOREST.list) for (let sp = 0; sp < 2; sp++) { const L = c.t[sp]; if (!L.length) continue; const pal = sp ? LAR : SPR; n += L.length;
       [P.near[sp], P.mid[sp], P.far[sp]].forEach((geo, lod) => { const im = new THREE.InstancedMesh(geo, mTree, L.length);
         L.forEach((t, i) => { _fm.compose(_fp.set(t[0], t[1], t[2]), _fq.setFromAxisAngle(_fy, t[3]), _fs.set(t[4], t[5], t[4])); im.setMatrixAt(i, _fm); im.setColorAt(i, pal[t[6] % pal.length]); });
-        im.castShadow = im.receiveShadow = lod < 2; im.visible = false; im.computeBoundingSphere(); grp.add(im); c.m[sp][lod] = im; }); }
+        im.castShadow = im.receiveShadow = lod < 2; im.customDepthMaterial = needleDepth; im.visible = false; im.computeBoundingSphere(); grp.add(im); c.m[sp][lod] = im; }); }
     const sg = K.tag(K.leaf(.95, .36, { ns: 3, nw: 2, bend: .55, fold: -.2, shape: v => 1 - v * .6 }), '#ffffff', 22, K.M([0, 0, 0], [1.2, 0, 0]));
-    const S = FOREST.sprays = new THREE.InstancedMesh(sg, mTree, 9000); S.count = 0; S.frustumCulled = false; S.castShadow = true; S.setColorAt(0, new THREE.Color(1, 1, 1)); grp.add(S); return n; }
+    const S = FOREST.sprays = new THREE.InstancedMesh(sg, mTree, 9000); S.count = 0; S.frustumCulled = false; S.castShadow = true; S.customDepthMaterial = needleDepth; S.setColorAt(0, new THREE.Color(1, 1, 1)); grp.add(S); return n; }
   function followForest(cam) {
     for (const c of FOREST.list) { const d = Math.hypot(c.x - cam.x, c.z - cam.z), lod = c.lod === 0 ? (d < 160 ? 0 : 1) : c.lod === 2 ? (d > 400 ? 2 : 1) : d < 130 ? 0 : d > 440 ? 2 : 1;      // a band of hysteresis, so a cell on the edge does not flicker
       if (lod !== c.lod) { c.lod = lod; for (let sp = 0; sp < 2; sp++) c.m[sp].forEach((im, k) => { im.visible = k === lod; }); } }
@@ -325,13 +390,50 @@ vec3 isGround(){
             _fm.compose(_fp.set(wx, t[1] + r.y * t[5], wz), _fq.setFromAxisAngle(_fy, Math.atan2(wx - t[0], wz - t[2]) + ((i * 104729) % 11) / 11 - .5), _fs.set(k, k, k)); S.setMatrixAt(n, _fm); S.setColorAt(n, pal[t[6] % pal.length]); n++; } } } }
     S.count = n; S.instanceMatrix.needsUpdate = true; if (S.instanceColor) S.instanceColor.needsUpdate = true; }
 
+  function talus(B, rocks, material) {
+    const random=rng(82014);
+    function place(x,z,rise,size,angle,kind){
+      if(nearRoad(x,z).d < 5.6+size || nearTrail(x,z).d<.85+size || Math.hypot(x-GP.x,z-GP.z)<11.8+size*.72) return;
+      const floor=ground(x,z);
+      const low=Math.min(ground(x+size*.62,z),ground(x-size*.62,z),ground(x,z+size*.62),ground(x,z-size*.62));
+      const footing=floor+.12*rise+.49*(low-floor);
+      B.put('r'+kind,rocks[kind],material,x,footing,z,angle,size,rise,RKC[kind]);
+    }
+    function fall(x,z,yaw,size){
+      const cs=Math.cos(yaw),sn=Math.sin(yaw);
+      const pieces=[[0,0,1.00,1.08,0],[1.24,.25,.83,.85,1],[-.77,.70,.63,.71,2],[-1.13,-.11,.35,.57,3]];
+      for(const [u,v,h,w,kind] of pieces) place(x+size*(cs*u-sn*v),z+size*(sn*u+cs*v),size*h,size*w,yaw+.17*random(),kind);
+      for(let j=0;j<(LOW?8:16);j++){
+        const a=random()*TAU, radial=size*(1.3+1.5*random());
+        const scale=size*(.055+.19*random());
+        place(x+radial*Math.cos(a),z+radial*Math.sin(a),scale*(.65+.33*random()),scale,yaw+random(),j%4);
+      }
+    }
+    // The rocky margin of the garden terrace and the exposed base of the seaward bend.
+    fall(-231,-268,-.32,2.35); fall(-240,-264,.58,1.5);
+    function roadside(i,scale){
+      const j=(i+1)%RD.n;
+      const x=RD.px[i],z=RD.pz[i],yaw=Math.atan2(RD.pz[j]-z,RD.px[j]-x);
+      const nx=-Math.sin(yaw),nz=Math.cos(yaw),d=9+.54*scale;
+      const side=H0(x+nx*d,z+nz*d)>H0(x-nx*d,z-nz*d)?1:-1;
+      fall(x+side*nx*d,z+side*nz*d,yaw,scale);
+    }
+    roadside(286,3.65);
+    for(let i=39;i<RD.n;i+=67){ if(Math.abs(i-286)>20) roadside(i,1.45+1.35*random()); }
+  }
   async function build(scene, prog, tick) {
-    const t0 = performance.now(); findRoad(); findTrail(); prog(.1); await tick();
+    const t0 = performance.now(); const maps=Geology.load(); findRoad(); findTrail(); trailReady=true; prog(.1); await tick(); await maps;
     const gm = groundMat(), grp = new THREE.Group(); grp.name = 'island'; scene.add(grp);
-    grp.add(gridMesh(IC.x - 620, IC.z - 620, 1240, LOW ? 260 : 440, (x, z) => { const r = nearRoad(x, z); if (r.d < 6.4) return Math.min(H0(x, z), r.y) - .75; const o = nearTrail(x, z); return o.d < 8.4 ? Math.min(fineH(x, z, o.d, o.y), o.y) - .7 : H0(x, z) - .15; }, gm));      // the far mesh ducks under the road and under the fine strip along the trail
+    grp.add(gridMesh(IC.x - 620, IC.z - 620, 1240, LOW ? 260 : 440, (x, z) => {
+      const r=nearRoad(x,z); if(r.d<6.4) return Math.min(H0(x,z),r.y)-.75;
+      const o=nearTrail(x,z), h=o.d<8.4?Math.min(fineH(x,z,o.d,o.y),o.y)-.7:H0(x,z)-.15;
+      // The 30cm terrace grid resolves ledges that 3–5m triangles can bridge. Recess only the covered interior.
+      const edge=Math.max(Math.abs(x-GP.x),Math.abs(z-GP.z));
+      return h-3.9*(1-sm(24,29.5,edge));
+    }, gm));
     prog(.3); await tick();
     grp.add(ribbon(gm)); grp.add(roadMesh(roadMat()));
-    grp.add(gridMesh(GP.x - 30, GP.z - 30, 60, 200, (x, z) => H0(x, z) + .14 + micro(x, z) * sm(11, 22, Math.hypot(x - GP.x, z - GP.z)), gm, true)); prog(.45); await tick();
+    grp.add(gridMesh(GP.x - 30, GP.z - 30, 60, 200, ground, gm, true)); prog(.45); await tick();
     // A shareable post-rain view; the regular weather simulation immediately takes it from here.
     Weather.S.pooled = Q.has('wet') ? .91 : 0;
     if (Q.has('wet')) Weather.S.wet = .95;
@@ -343,9 +445,9 @@ vec3 isGround(){
       state.x=w.pooled;
       state.y=w.rain*(1.-w.ice); state.z=G.look.surface?1:0;
     });
-    const mTree = FXKit.mat({ sway: [.02, 10] }), mGrass = FXKit.mat({ sway: [.22, .3] }), mShrub = FXKit.mat({ sway: [.06, .4] }), mStill = FXKit.mat();
+    const mTree = FXKit.mat({ sway: [.02, 10] }), mGrass = FXKit.mat({ sway: [.22, .3] }), mShrub = FXKit.mat({ sway: [.06, .4] }), mStill = FXKit.mat(), mStone=Geology.boulderMaterial();
     const P = { near: [conifer(false, 15, 18, true, .34, 3), conifer(true, 13, 18, true, .34, 3)], mid: [conifer(false, 8, 10), conifer(true, 7, 10)], far: [outline(), outline()],
-      tuft: [tuft(.36, 14), tuft(.3, 14), tuft(.42, 13)], bil: [bilberry(), bilberry()], fern: [fern(), fern()], rock: [0, 1, 2, 3].map(i => K.tag(K.blob(i * 7.3 + 1, .3, 14, 10), '#ffffff', 7, K.M([0, 0, 0], [0, 0, 0], [1, .72, 1]))),
+      tuft: [tuft(.36, 14), tuft(.3, 14), tuft(.42, 13)], bil: [bilberry(), bilberry()], fern: [fern(), fern()], rock: [0, 1, 2, 3].map(i => Geology.fragment(i)),
       log: K.merge([K.tag(K.tube([V(-2.2, .16, 0), V(0, .2, .1), V(2.2, .14, 0)], t => .17 - .05 * t, 7), '#b8ab98', 4), K.tag(K.tube([V(.6, .2, 0), V(.9, .5, .3), V(1.1, .9, .4)], t => .05 - .03 * t, 4), '#b8ab98', 4)]) };
     const B = K.buckets(grp, 60); { const put0 = B.put; B.put = (key, geo, mat, x, y, z, rot, s, sy, col, ...more) => { if (key[0] === 'r' && s >= .45) ROCKS.push([x, y, z, s, sy === undefined ? s : sy]); return put0.call(B, key, geo, mat, x, y, z, rot, s, sy, col, ...more); }; }
     // forest: trees everywhere under the treeline, larches as it nears
@@ -359,16 +461,17 @@ vec3 isGround(){
       const put = (key, geo, mat, off, s, sy, col, sink = 0) => { const [x, z] = at(off, rr(-.5, .5)); if (nearTrail(x, z).d < Math.min(Math.abs(off), .75)) return; B.put(key, geo, mat, x, ground(x, z) - sink, z, rr(0, TAU), s, sy, col); };
       if (forest) { if (R() < .8) put('f' + (i & 1), P.fern[i & 1], mShrub, (R() < .5 ? -1 : 1) * rr(.9, 5), rr(.7, 1.4)); if (R() < .4) put('b' + (i & 1), P.bil[i & 1], mShrub, (R() < .5 ? -1 : 1) * rr(.9, 4), rr(.8, 1.5)); }
       else if (meadow) { if (R() < .6) put('b' + (i & 1), P.bil[i & 1], mShrub, (R() < .5 ? -1 : 1) * rr(.9, 5), rr(.9, 1.9)); }
-      else for (let k = 0; k < 4; k++) put('r' + (k & 3), P.rock[k & 3], mStill, (R() < .5 ? -1 : 1) * rr(.75, 5), rr(.12, .42), undefined, pick(RKC), .05);
-      if (R() < .14) put('r' + (i & 3), P.rock[i & 3], mStill, (R() < .5 ? -1 : 1) * rr(1.6, 6), rr(.3, .9), undefined, pick(RKC), .2); }
-    for (let k = 0; k < 420; k++) { const an = rr(0, TAU), r = Math.sqrt(R()) * 70, x = SUMMIT.x + Math.cos(an) * r, z = SUMMIT.z + Math.sin(an) * r; if (nearTrail(x, z).d < 2.4 || r < 6) continue; const s = rr(.5, 2.4); B.put('r' + (k & 3), P.rock[k & 3], mStill, x, ground(x, z) - s * .2, z, rr(0, TAU), s, s * rr(.6, 1), pick(RKC)); }
+      else for (let k = 0; k < 4; k++) put('r' + (k & 3), P.rock[k & 3], mStone, (R() < .5 ? -1 : 1) * rr(.75, 5), rr(.12, .42), undefined, pick(RKC), .05);
+      if (R() < .14) put('r' + (i & 3), P.rock[i & 3], mStone, (R() < .5 ? -1 : 1) * rr(1.6, 6), rr(.3, .9), undefined, pick(RKC), .2); }
+    for (let k = 0; k < 420; k++) { const an = rr(0, TAU), r = Math.sqrt(R()) * 70, x = SUMMIT.x + Math.cos(an) * r, z = SUMMIT.z + Math.sin(an) * r; if (nearTrail(x, z).d < 2.4 || r < 6) continue; const s = rr(.5, 2.4); B.put('r' + (k & 3), P.rock[k & 3], mStone, x, ground(x, z) - s * .2, z, rr(0, TAU), s, s * rr(.6, 1), pick(RKC)); }
     // the shore: pebbles, boulders and driftwood where the land meets the water
     for (let k = 0; k < 1500; k++) { const an = rr(0, TAU), c = Math.cos(an), s = Math.sin(an); let r = 520; for (; r > 300; r -= 4) if (H0(IC.x + c * r, IC.z + s * r) > .3) break; r -= rr(0, 16); const x = IC.x + c * r, z = IC.z + s * r, h = H0(x, z); if (h < -.3 || h > 4.5 || nearRoad(x, z).d < 5.2) continue;
-      if (R() < .035) B.put('log', P.log, mStill, x, h - .05, z, rr(0, TAU), rr(.6, 1.3)); else { const sc = R() < .08 ? rr(.5, 1.6) : rr(.06, .3); B.put('r' + (k & 3), P.rock[k & 3], mStill, x, h - sc * .25, z, rr(0, TAU), sc, sc * rr(.5, .9), pick(RKC)); } }
+      if (R() < .035) B.put('log', P.log, mStill, x, h - .05, z, rr(0, TAU), rr(.6, 1.3)); else { const sc = R() < .08 ? rr(.5, 1.6) : rr(.06, .3); B.put('r' + (k & 3), P.rock[k & 3], mStone, x, h - sc * .25, z, rr(0, TAU), sc, sc * rr(.5, .9), pick(RKC)); } }
+    talus(B,P.rock,mStone);
     G.info.islandInst = B.flush({ cast: true, receive: true }); G.info.trees = buildForest(grp, P, mTree);
     { const a = [], x = SUMMIT.x + 1.6, z = SUMMIT.z - 2.2;       // the cairn
       for (let i = 0; i < 16; i++) { const lv = Math.floor(i / 4), an = i * 1.7, r = (.5 - lv * .11) * (i % 4 ? 1 : .3), s = rr(.2, .3) * (1 - lv * .12); a.push(K.tag(K.blob(i * 3.1, .3), pick(['#8d8a86', '#7c7a78', '#9a958e']), 7, K.M([Math.cos(an) * r, .12 + lv * .27, Math.sin(an) * r], [rr(-.3, .3), rr(0, 6), rr(-.3, .3)], [s * 1.2, s * .7, s]))); }
-      const cm = new THREE.Mesh(K.merge(a), mStill); cm.position.set(x, ground(x, z), z); cm.castShadow = cm.receiveShadow = true; grp.add(cm); }
+      const cm = new THREE.Mesh(K.merge(a), mStone); cm.position.set(x, ground(x, z), z); cm.castShadow = cm.receiveShadow = true; grp.add(cm); }
     tileSet(grp, 7, 5, LOW ? 500 : 1100, P.tuft, mGrass, 1); tileSet(grp, 20, 7, LOW ? 500 : 1000, P.tuft, mGrass, 2.3);
     G.tick.push(() => { followGrass(G.camera.position); followForest(G.camera.position); }); followGrass(V(GP.x, 0, GP.z)); while (tileQ.length) followGrass(V(GP.x, 0, GP.z)); followForest(V(GP.x, 0, GP.z));
     G.info.island = { trail: T.n, road: RD.len, summit: [Math.round(SUMMIT.x), Math.round(SUMMIT.y), Math.round(SUMMIT.z)], ms: Math.round(performance.now() - t0) }; prog(1);
