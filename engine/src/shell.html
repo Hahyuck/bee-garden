@@ -1,6 +1,13 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>garden engine</title>
+<script>
+// Launch the standalone racing build before allocating the island or WebGL.
+// Preserve the project's pixel settings in a shareable engine/?mode=arcade URL.
+if(new URLSearchParams(location.search).get('mode')==='arcade'){
+  const arcadeURL=new URL('arcade/',location.href);arcadeURL.search=location.search;location.replace(arcadeURL.href);
+}
+</script>
 <style>
 html,body{margin:0;height:100%;background:#0b0d0c;overflow:hidden}
 canvas{display:block;width:100vw;height:100vh;touch-action:none}

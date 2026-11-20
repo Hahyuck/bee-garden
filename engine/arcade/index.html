@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#102b32">
+  <meta name="description" content="COASTLINE GT — 8대의 스톡카, 해안 서킷, 3랩 아케이드 레이싱. 벌의 정원 엔진으로 만든 오리지널 브라우저 게임.">
+  <title>COASTLINE GT · 아케이드 레이싱</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f7cf55'/%3E%3Cpath d='M6 8h20v6H12v5h14v6H6z' fill='%23102b32'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="arcade.css">
+</head>
+<body data-phase="loading">
+  <main id="game" aria-label="COASTLINE GT 레이싱 게임">
+    <canvas id="race-canvas" aria-label="3D 해안 레이싱 서킷"></canvas>
+    <div class="screen-shade" aria-hidden="true"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="COASTLINE GT 시작 화면"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>COASTLINE <b>GT</b><small>ARCADE RACING CLUB</small></span></a>
+      <nav aria-label="게임 설정">
+        <button id="sound-button" class="icon-button" aria-label="소리 켜기" aria-pressed="false">♪ <span>소리 OFF</span></button>
+        <button id="quality-button" class="icon-button" aria-label="화질 변경">▦ <span id="quality-label">PIXEL 240</span></button>
+        <button id="fullscreen-button" class="icon-button" aria-label="전체 화면">⛶ <span>전체 화면</span></button>
+        <a class="engine-link" href="../?mode=drive&style=pixel&day=11.5&weather=clear&raster=240&pixelFit=auto" aria-label="기존 정원 엔진으로 돌아가기">정원 엔진 ↗</a>
+      </nav>
+    </header>
+
+    <section id="loading" class="loading-card" aria-live="polite"><span class="eyebrow">PREPARING THE GRID</span><h1>서킷을 준비하고 있습니다.</h1><p id="loading-message">바다, 스톡카, 그리고 출발선.</p></section>
+
+    <section id="lobby" class="lobby" aria-labelledby="game-title" hidden>
+      <div class="hero-copy">
+        <div class="eyebrow hero-kicker"><span class="live-dot"></span> SEASIDE SPEEDWAY <span>EST. 1994</span></div>
+        <h1 id="game-title">COASTLINE<span>GT<span class="title-arrow" aria-hidden="true">↗</span></span></h1>
+        <p class="tagline">바다를 가르는 <em>3랩.</em></p>
+        <p class="intro">엔진을 깨우고, 코너를 흘려보내세요.<br>8대의 스톡카. 마지막 1초까지 이어지는 승부.</p>
+        <div class="start-row"><button id="start-button" class="primary-button">레이스 시작 <span>↗</span></button><span class="enter-note"><kbd>ENTER</kbd> TO START</span></div>
+        <fieldset class="difficulty"><legend>주행 난이도</legend><label><input type="radio" name="difficulty" value="normal" checked><span>ARCADE <small>표준</small></span></label><label><input type="radio" name="difficulty" value="easy"><span>ROOKIE <small>입문</small></span></label></fieldset>
+        <p class="best-line" id="lobby-best">YOUR NEXT PERSONAL BEST STARTS HERE.</p>
+      </div>
+      <aside class="course-card" aria-label="코스 정보">
+        <div class="course-card-heading"><span>THE CIRCUIT</span><b>01</b></div>
+        <canvas id="lobby-map" width="300" height="230" aria-label="타원형 해안 서킷 지도"></canvas>
+        <h2>SEASIDE<br>SPEEDWAY</h2>
+        <p>푸른 바다 옆, 뱅크 코너를 품은 고속 서킷.</p>
+        <div class="course-stats"><div><b>2.01<small>KM</small></b><span>TRACK LENGTH</span></div><div><b>03</b><span>LAPS</span></div><div><b>08</b><span>DRIVERS</span></div></div>
+        <div class="weather-note"><span>☀</span> CLEAR SKY <span>11:30 AM</span></div>
+      </aside>
+      <footer class="lobby-footer"><span class="footer-label">DRIVER'S MANUAL</span><div><kbd>W</kbd> 가속 <kbd>S</kbd> 제동 <kbd>←</kbd><kbd>→</kbd> 조향 <kbd>SPACE</kbd> 드리프트 <kbd>C</kbd> 시점</div><span class="built-with">BUILT IN THE GARDEN <span>✳</span></span></footer>
+    </section>
+
+    <section id="race-hud" class="race-hud" aria-label="레이스 계기판" hidden>
+      <div class="race-top">
+        <div class="position-readout"><span class="hud-label">POSITION</span><div><strong id="position">08</strong><span>/ 08</span></div><small id="position-label">추월을 준비하세요</small></div>
+        <div class="timer-readout"><span class="hud-label">TIME LEFT</span><strong id="time-left">45.00</strong><div class="timer-track"><span id="timer-bar"></span></div></div>
+        <div class="lap-readout"><span class="hud-label">LAP</span><div><strong id="lap">1</strong><span>/ 3</span></div><small id="elapsed">00:00.000</small></div>
+      </div>
+      <div class="track-panel"><div><span class="hud-label">SEASIDE SPEEDWAY</span><span id="checkpoint-label">CP 1 / 3</span></div><canvas id="race-map" width="240" height="220" aria-label="플레이어와 상대 차량의 실시간 위치"></canvas><div class="map-legend"><i></i> YOU <span>● RIVALS</span></div><div class="progress-track"><span id="lap-progress"></span></div></div>
+      <div class="speed-panel"><div id="driving-status" class="driving-status">FULL THROTTLE</div><div class="speed-value"><strong id="speed">000</strong><span>KM/H</span><div class="gear"><small>AT</small><b id="gear">1</b></div></div><div class="rpm-bars" id="rpm-bars" aria-label="엔진 회전수"></div><div class="speed-footer"><span>COASTLINE / 27</span><span id="camera-label">CHASE CAM</span></div></div>
+      <div class="race-controls"><span><kbd>W</kbd> 가속 <kbd>S</kbd> 제동 <kbd>A</kbd><kbd>D</kbd> 조향 <kbd>SPACE</kbd> 드리프트</span><button id="camera-button" aria-label="카메라 시점 변경">C 시점</button><button id="reset-button" aria-label="차량을 코스 중앙으로 복귀">R 복귀</button><button id="pause-button" aria-label="레이스 일시정지">Ⅱ 일시정지</button></div>
+    </section>
+
+    <div id="race-message" class="race-message" aria-live="polite" hidden><span id="message-kicker"></span><strong id="message-text"></strong><small id="message-detail"></small></div>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <div id="touch-controls" class="touch-controls" aria-label="터치 운전 조작" hidden><div class="touch-steering"><button data-control="left" aria-label="왼쪽 조향">◀</button><button data-control="right" aria-label="오른쪽 조향">▶</button></div><div class="touch-pedals"><button data-control="drift" class="touch-drift" aria-label="드리프트">DRIFT</button><button data-control="brake" class="touch-brake" aria-label="브레이크">BRAKE</button><button data-control="throttle" class="touch-gas" aria-label="가속 페달">GAS</button></div></div>
+
+    <section id="pause-overlay" class="modal-overlay" aria-labelledby="pause-title" hidden><div class="result-card pause-card"><span class="eyebrow">TAKE A BREATHER</span><h2 id="pause-title">잠시 피트 인.</h2><p>다시 준비되면 출발하세요.<br>시간과 차량은 멈춰 있습니다.</p><button id="resume-button" class="primary-button">계속 달리기 <span>→</span></button><div class="secondary-actions"><button id="restart-button">처음부터 다시</button><button id="quit-button">시작 화면</button></div></div></section>
+
+    <section id="result-overlay" class="modal-overlay" aria-labelledby="result-title" hidden><div class="result-card"><span id="result-kicker" class="eyebrow">THE CHECKERED FLAG</span><h2 id="result-title">FINISH!</h2><p id="result-subtitle">세 바퀴의 승부가 끝났습니다.</p><div class="result-position"><strong id="result-position">01</strong><span>/ 08<small>FINAL POSITION</small></span></div><div class="result-stats"><div><span>RACE TIME</span><b id="result-time">00:00.000</b></div><div><span>PERSONAL BEST</span><b id="result-best">—</b></div></div><p id="result-tip"></p><button id="retry-button" class="primary-button">한 번 더 달리기 <span>↗</span></button><button id="result-home" class="text-button">시작 화면으로</button></div></section>
+    <output id="game-status" class="sr-only" aria-label="현재 경기 상태"></output>
+  </main>
+  <noscript><div class="loading-card">레이싱 게임을 실행하려면 JavaScript를 켜 주세요.</div></noscript>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

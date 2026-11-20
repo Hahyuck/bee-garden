@@ -137,6 +137,14 @@ Phys.pre.push(h => {
 
 ## 4. 게임 규칙 넣기
 
+### 새 게임 예제: COASTLINE GT
+
+`arcade/`에는 엔진 저장소의 Three.js를 사용하는 독립 아케이드 레이싱이 있습니다. [게임 실행](https://hahyuck.github.io/bee-garden/engine/arcade/?style=pixel&raster=240&pixelFit=auto&day=11.5&weather=clear) · [구현 안내](arcade/README.md)
+
+`src/89_arcade_launcher.js`가 `Modes.add('arcade', …)`로 월드 메뉴에 진입점을 등록합니다. 전용 페이지는 섬의 물리·지형을 생성하지 않아 빠르게 로딩하며, `?mode=arcade`도 이 페이지로 연결됩니다. 게임 규칙은 렌더러와 분리된 `arcade/race-core.js`, 코스와 차량은 `arcade/world.js`, 조작·HUD는 `arcade/app.js`, WebGL/Canvas 렌더링은 `arcade/renderer.js`가 담당합니다. 수정 후 기존 빌드 명령과 `node --test arcade/race-core.test.mjs`를 실행합니다.
+
+아래 예제들은 기존 월드 내부에 오브젝트와 규칙을 추가하는 방식입니다.
+
 게임은 "모드" 하나로 만듭니다. 모드는 들어올 때 할 일(`enter`), 나갈 때 할 일(`leave`), 매 프레임 할 일(`step`)을 가진 객체입니다. `step`이 카메라를 놓고, 규칙을 검사하고, 화면 아래에 보일 한 줄을 돌려줍니다.
 
 **예시 4-1. 통+돌 랜덤 낙하.** `0` 키를 누르면 해안 도로의 자유시점에서 통과 돌이 떨어집니다. 시선을 돌리거나 이동하면 다음 물체가 떨어질 위치도 바뀝니다. [모드 전체 코드](src/89_example_collect.js)

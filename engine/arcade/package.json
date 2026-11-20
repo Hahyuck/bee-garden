@@ -1,0 +1,6 @@
+{
+  "name": "coastline-gt",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test race-core.test.mjs" }
+}

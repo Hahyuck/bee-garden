@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "mode": "arcade",
+  "style": "pixel",
+  "raster": 240,
+  "pixelFit": "auto",
+  "character": "kate",
+  "scenario": null,
+  "assets": [],
+  "day": 11.5,
+  "weather": "clear"
+}

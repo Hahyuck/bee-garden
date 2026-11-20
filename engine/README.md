@@ -4,6 +4,14 @@
 
 **사용 안내: [GUIDE.md](GUIDE.md)** — 실행하고 고치기, 세계 바꾸기, 물리와 효과, 게임 규칙 넣기, 게임 엔진으로 활용하는 방법을 예시와 함께 정리했습니다. `0` 키의 "통+돌 랜덤 낙하"가 그 예시 게임입니다(`src/89_example_collect.js`).
 
+## COASTLINE GT — 새 아케이드 레이싱
+
+[**COASTLINE GT 플레이**](https://hahyuck.github.io/bee-garden/engine/arcade/?style=pixel&raster=240&pixelFit=auto&day=11.5&weather=clear) · [제작·조작 안내](arcade/README.md)
+
+1990년대 스톡카 아케이드의 속도감에서 출발한 오리지널 게임입니다. 약 2.01km의 해안 스피드웨이에서 8대가 3랩을 달립니다. 출발 카운트다운, 순위, 자동 4단 변속, 드리프트, 슬립스트림, 차량·벽 충돌, 체크포인트 시간 연장, 완주·시간 초과, 난이도별 최고 기록을 갖췄습니다. 키보드·터치·표준 게임패드를 지원합니다.
+
+플레이 모드의 **GT 아케이드 레이싱** 또는 `?mode=arcade`로 진입합니다. 기존 해안 타임 트라이얼(`?mode=drive`)도 그대로 실행할 수 있습니다. 전용 진입점 `arcade/`는 이 저장소의 Three.js와 새 주행·장면 모듈을 사용하고, WebGL이 없는 브라우저에서는 동일한 3D 지오메트리를 Canvas로 투영해 플레이합니다. 외부 CDN이나 새 모델 다운로드가 필요하지 않습니다.
+
 자유시점은 해안 정원의 바위 앞에서 시작합니다. 옆면에는 갈라진 암반의 결이 이어지고, 아래로 내려가면 흙에 파묻힌 자갈이 보입니다. [오후의 해안 정원](https://hahyuck.github.io/bee-garden/engine/?day=16.15&still&weather=clear) · [캐릭터 직접 조작](https://hahyuck.github.io/bee-garden/engine/?mode=actors&day=16&weather=clear)
 
 ### 재질과 모델의 출처

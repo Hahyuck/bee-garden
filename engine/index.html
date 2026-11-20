@@ -1,6 +1,13 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>garden engine</title>
+<script>
+// Launch the standalone racing build before allocating the island or WebGL.
+// Preserve the project's pixel settings in a shareable engine/?mode=arcade URL.
+if(new URLSearchParams(location.search).get('mode')==='arcade'){
+  const arcadeURL=new URL('arcade/',location.href);arcadeURL.search=location.search;location.replace(arcadeURL.href);
+}
+</script>
 <style>
 html,body{margin:0;height:100%;background:#0b0d0c;overflow:hidden}
 canvas{display:block;width:100vw;height:100vh;touch-action:none}
@@ -8136,6 +8143,26 @@ const WalkActions = (() => {
     release() { running=false; jumpPending=false; paint(); },
     consumeJump() { const jump = jumpPending; jumpPending = false; return jump; }
   };
+})();
+
+// ===== 89_arcade_launcher.js =====
+
+// A dedicated entry keeps the speedway independent of island terrain/physics.
+// The same repository's Three.js builds its scene; a software renderer also
+// plays that scene when a browser cannot create a WebGL context.
+const ArcadeLaunch = (() => {
+  function enter() {
+    const url = new URL('arcade/', location.href);
+    url.searchParams.set('style', VisualStyle.current === 'native' ? 'native' : 'pixel');
+    url.searchParams.set('raster', String(VisualStyle.raster || 240));
+    url.searchParams.set('pixelFit', Q.get('pixelFit') || 'auto');
+    url.searchParams.set('day', '11.5');
+    url.searchParams.set('weather', 'clear');
+    location.assign(url.href);
+  }
+  Modes.add('arcade', {name:'COASTLINE GT', enter, leave(){}, step(){return 'COASTLINE GT 서킷으로 이동합니다.';}});
+  document.getElementById('mode-picker').add(new Option('GT 아케이드 레이싱', 'arcade'));
+  return {enter};
 })();
 
 // ===== 89_boat_wake.js =====
