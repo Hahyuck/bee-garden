@@ -158,11 +158,25 @@ const ActorWalk = (() => {
     orbitPointer = e.pointerId; pointerX = e.clientX; pointerY = e.clientY;
     if (!firstPerson || e.pointerType !== 'mouse') e.target.setPointerCapture(e.pointerId);
   });
-  // Locked mice send relative mouse movement even at the physical screen edge.
-  document.addEventListener('mousemove',e=>{
-    if(!active||!firstPerson||PulseRange.paused||document.pointerLockElement!==G.R.domElement)return;
-    azimuth-=e.movementX*.0026;pitch=clamp(pitch-e.movementY*.0026,-1.34,1.34);
+  const canvas=document.getElementById('c');
+  let mouseX=null,mouseY=0,edgeYaw=0,edgePitch=0;
+  function resetMouse(){mouseX=null;edgeYaw=edgePitch=0;}
+  // Screen coordinates also work in embedded browsers where pointer lock is unavailable.
+  function edgeSpeed(fraction){
+    const axis=2*fraction-1;
+    return Math.sign(axis)*sm(.82,1,Math.abs(axis));
+  }
+  canvas.addEventListener('pointermove',e=>{
+    if(e.pointerType!=='mouse'||!active||!firstPerson||PulseRange.paused)return;
+    if(mouseX!==null){
+      azimuth-=(e.clientX-mouseX)*.0026;pitch=clamp(pitch-(e.clientY-mouseY)*.0026,-1.34,1.34);
+    }
+    mouseX=e.clientX;mouseY=e.clientY;
+    const rect=canvas.getBoundingClientRect();
+    edgeYaw=edgeSpeed((mouseX-rect.left)/rect.width);edgePitch=edgeSpeed((mouseY-rect.top)/rect.height);
   });
+  canvas.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')resetMouse();});
+  document.addEventListener('focusin',resetMouse);
   addEventListener('pointermove', e => {
     if (e.pointerId !== orbitPointer) return;
     azimuth -= (e.clientX - pointerX) * .006;
@@ -172,7 +186,7 @@ const ActorWalk = (() => {
   });
   for (const event of ['pointerup','pointercancel','lostpointercapture'])
     addEventListener(event, e => { if (e.pointerId === orbitPointer) stopOrbit(); });
-  function clearInput() { stopOrbit(); jumpPressed = false; }
+  function clearInput() { stopOrbit();resetMouse();jumpPressed = false; }
   addEventListener('blur', clearInput);
   document.addEventListener('visibilitychange', () => { if (document.hidden) clearInput(); });
   addEventListener('keydown', e => {
@@ -440,17 +454,19 @@ const ActorWalk = (() => {
   function endApproach() {
     if (!savedWalk) return;
     leave();
-    if (firstPerson && document.pointerLockElement === G.R.domElement) document.exitPointerLock();
     feet.copy(savedWalk.feet); facing=savedWalk.facing; azimuth=savedWalk.azimuth; pitch=savedWalk.pitch;
     placed=savedWalk.placed; savedWalk=null; firstPerson=false; extraFloor=null;
   }
   function stepFirstPerson(camera,dt) {
+    azimuth-=edgeYaw*2.45*dt;pitch=clamp(pitch-edgePitch*1.6*dt,-1.34,1.34);
     if (player) walk(dt);
     const height=player?.entry?.height || 1.71;
     camera.position.copy(feet); camera.position.y+=height*(.91-.26*lowCamera);
     camera.rotation.set(pitch,azimuth,0,'YXZ'); camera.near=.04; camera.fov=68+4*fastCamera;
   }
   return {enter,leave,step,selectHuman,beginApproach,endApproach,stepApproach:step,stepFirstPerson,clearInput,
+    get anglerEntry(){return selectedHuman?.species==='frog'?null:selectedHuman;},
+    loadActor,releaseActor:release,
     beginFirstPerson(x,z,yaw) { beginApproach(x,z,yaw,null,true); }, get position() {return feet;},
     get avatar(){return player?.holder || null;}, get thirdPerson(){return active&&!firstPerson;},get climbing(){return climbing;},
     get currentId() {

@@ -112,7 +112,7 @@ void main(){ vec2 uv = vUv;
     const bl = (from, to, x, y) => { M.blur.uniforms.tC.value = from.texture; M.blur.uniforms.uDir.value.set(x, y); pass(M.blur, to); };
     bl(b1a, b1b, 1 / b1a.width, 0); bl(b1b, b1a, 0, 1 / b1a.height); bl(b1a, b2b, 1 / b2a.width, 0); bl(b2b, b2a, 0, 1 / b2a.height);
     const f = M.fin.uniforms; f.tC.value = src.texture; f.tB1.value = b1a.texture; f.tB2.value = b2a.texture; f.uExp.value = exp; f.uAspect.value = W / H; f.tD.value = rtMain.depthTexture; f.uEye.value = lens.eye; f.uRes.value.set(W, H); f.uBloom.value = G.look.bloom ? C.bloom : 0; f.uFilm.value = G.look.film ? 1 : 0;
-    f.uGrain.value=PixelFit.enabled?0:C.grain;
+    f.uGrain.value=PixelFit.enabled||VisualStyle.usesRaster()?0:C.grain;
     f.uWaterClip ??= {value:new THREE.Vector3()};
     f.uWaterClip.value.set(Modes.cur==='sub'?Math.max(0,CFG.sea.level-camera.position.y):0,camera.near,camera.far);
     // where the sun is on the screen, and whether its shafts can be seen: low sun, in front of the lens, not behind a storm

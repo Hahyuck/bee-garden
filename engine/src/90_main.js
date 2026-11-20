@@ -40,7 +40,9 @@
     Modes.step(camera, dt); VisualStyle.frame(camera); camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
     for (const f of G.tick) f(t, dt);
     Minimap.draw(t);
-    Post.render(scene, VisualStyle.renderCamera(camera), dt);
+    const view=VisualStyle.renderCamera(camera);
+    Modes.shadows(view);
+    Post.render(scene, view, dt);
     if (Modes.cur === 'drive') DriveRace.renderMirror(R,scene,dt); }
   window.__frameAt = (t, dt = 1 / 60) => frame(t, dt);
   frame(0, 1 / 60); Studio.restore(); loader.style.opacity = 0; setTimeout(() => loader.remove(), 700);

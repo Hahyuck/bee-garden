@@ -52,7 +52,7 @@ const CFG = {
     rolling: [14, 70, 110, 190],
     gears: [0, 3.55, 2.05, 1.42, 1.08, .86], finalDrive: 3.9, reverse: 3.4,
     torque: 168, brake: 9500, drag: .42,
-    steerLock: .56, steerSpeedK: 31,
+    steerLock: .56, steerHalfSpeed: 8,  // radians at parking speed; m/s at half lock
     wetGripLoss: .2, iceGripLoss: .65, snowGripLoss: .45, snowRolling: 60,
   },
 };

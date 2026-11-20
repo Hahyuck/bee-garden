@@ -1,9 +1,13 @@
 'use strict';
 const VisualStyle=(()=>{
   const sizes=[[240,160],[360,240],[480,320],[600,400],[720,480]];
-  const names={native:'3D',diorama:'디오라마',pixel:'픽셀',gaussian:'가우시안',
-    'yeoul-2d':'여울 2D · 단색 도트','yeoul-25d':'여울 2.5D · 디더링','yeoul-3d':'흑연명암 3D',
-    'cradle-2d':'AI요람 2D · 클린 도트','cradle-25d':'AI요람 2.5D · HD-2D 라이트','cradle-3d':'클릭픽셀 3D'};
+  const groups={pixel:'픽셀','2d':'2D','25d':'2.5D',native:'3D','cradle-3d':'클린 픽셀 3D','yeoul-3d':'흑연명암 3D',diorama:'디오라마',gaussian:'가우시안'};
+  const variants={'2d':{'cradle-2d':'클린 도트','yeoul-2d':'단색 도트'},'25d':{'cradle-25d':'HD-2D 라이트','yeoul-25d':'디더링'}};
+  const names={};
+  for(const [group,label] of Object.entries(groups)){
+    if(variants[group])for(const [id,name] of Object.entries(variants[group]))names[id]=label+' · '+name;
+    else names[group]=label;
+  }
   let mode='native', raster=240, target=null, display=null;
   const camera=new THREE.OrthographicCamera(-1,1,1,-1,0,1),scene=new THREE.Scene();
   const focus=new THREE.Vector3(),diagonal=new THREE.Vector3(14,12,-17),flat=new THREE.Vector3(0,27,40);
@@ -142,5 +146,5 @@ const VisualStyle=(()=>{
   PixelFit.select(Q.get('pixelFit'));
   function walkYaw(){const offset=fixedView();return offset&&ActorWalk.thirdPerson?Math.atan2(offset.x,offset.z)+yaw:null;}
   function renderCamera(camera){return PixelFit.snapped(camera,subject(),mode+'/'+Modes.cur);}
-  return {names,sizes,select,frame,output,present,renderCamera,usesRaster,walkYaw,makeFilter,configureFilter,get current(){return mode;},get raster(){return raster;}};
+  return {groups,variants,names,sizes,select,frame,output,present,renderCamera,usesRaster,walkYaw,makeFilter,configureFilter,get current(){return mode;},get raster(){return raster;}};
 })();

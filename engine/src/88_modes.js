@@ -43,7 +43,10 @@ const Modes = (() => {
   function set(name,restart=false) { if (name==='hike') name='fps'; if (!MODES[name] || (name === cur&&!restart)) return; keys.clear(); MODES[cur].leave(); if (cur !== 'free' && cur !== 'drive') fly.p.copy(G.camera.position); cur = name; picker.value=cur; MODES[cur].enter(); hudAt = 0; }
   // the shadow map: a box around the lens, snapped to its own texels so it does not swim; small for the bee, wide from the air
   const SHP = [[310, 520, 20, 1100, -.00035, .22], [75, 260, 1, 520, -.00008, .07], [7, 40, 1, 80, -.00004, .0025], [24, 100, 1, 205, -.000035, .009]], SR = new THREE.Vector3(), SU = new THREE.Vector3(); let shMode = -1;
-  function shadows(camera, k) { const sun = G.sun, sc = sun.shadow.camera, p = SHP[k], S = Sky.light; q.setFromRotationMatrix(m.lookAt(S, P.set(0, 0, 0), UP)); SR.set(1, 0, 0).applyQuaternion(q); SU.set(0, 1, 0).applyQuaternion(q);
+  function shadows(camera) {
+    const high = camera.position.y - Math.max(Island.surf(camera.position.x, camera.position.z)[0], 0);
+    const k = cur === 'bee' && !(window.__cam || dbg) ? 2 : high>45 ? 0 : high<8 && ['actors','fps','drive','flight','fishing','sample'].includes(cur) ? 3 : 1;
+    const sun = G.sun, sc = sun.shadow.camera, p = SHP[k], S = Sky.light; q.setFromRotationMatrix(m.lookAt(S, P.set(0, 0, 0), UP)); SR.set(1, 0, 0).applyQuaternion(q); SU.set(0, 1, 0).applyQuaternion(q);
     if (k !== shMode) { shMode = k; sc.left = sc.bottom = -p[0]; sc.right = sc.top = p[0]; sc.near = p[2]; sc.far = p[3]; sc.updateProjectionMatrix(); sun.shadow.bias = p[4]; sun.shadow.normalBias = p[5]; }
     const ts = 2 * p[0] / sun.shadow.mapSize.x, cp = camera.position; c.set(0, 0, 0).addScaledVector(SR, Math.round(cp.dot(SR) / ts) * ts).addScaledVector(SU, Math.round(cp.dot(SU) / ts) * ts).addScaledVector(S, cp.dot(S));
     sun.target.position.copy(c); sun.position.copy(c).addScaledVector(S, p[1]); sun.target.updateMatrixWorld(); sun.updateMatrixWorld(); }
@@ -53,7 +56,6 @@ const Modes = (() => {
     camera.near = .3; Post.lens.aperture = 0; Post.lens.focus = 10; Post.lens.fisheye = false; if (cur !== 'bee') Post.lens.eye = 0; let line;
     const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); camera.fov = fix[6] || CC.fov; camera.near = fix[7] || .3; line = ''; }
     else line = MODES[cur].step(camera, dt);
-    const high = camera.position.y - Math.max(Island.surf(camera.position.x, camera.position.z)[0], 0); shadows(camera, cur === 'bee' && !fix ? 2 : high>45 ? 0 : high<8 && ['actors','fps','drive','flight','sample'].includes(cur) ? 3 : 1);
     if (performance.now() - hudAt > 250) {
       hudAt = performance.now();
       hud.id='mode-hint';hud.textContent=line;
@@ -81,5 +83,5 @@ const Modes = (() => {
   document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)release();});
   addEventListener('blur',release);addEventListener('pagehide',release);
   document.addEventListener('visibilitychange', () => { if (document.hidden) keys.clear(); });
-  return { step, set, add, visitOutcrop, MODES, fly, keys, get cur() { return cur; } };
+  return { step, shadows, set, add, visitOutcrop, MODES, fly, keys, get cur() { return cur; } };
 })();

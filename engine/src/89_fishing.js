@@ -2,6 +2,7 @@
 const Fishing=(()=>{
   const site=new THREE.Vector3(94,0,-550),floatAt=new THREE.Vector3(),tip=new THREE.Vector3(),aim=new THREE.Vector3();
   const group=new THREE.Group(),rig=new THREE.Group(),float=new THREE.Group(),fish=new THREE.Group();
+  const handle=new THREE.Group();handle.name='fishing-rod-grip';let crank=0;
   const rods=[{name:'연질대',range:9,power:2.9,flex:1.3},{name:'만능대',range:13,power:3.9,flex:1},{name:'원투대',range:18,power:4.9,flex:.7}];
   const baits=['곡물 떡밥','크릴 떡밥','오징어살'];
   const species=[['망상어',.22,0],['숭어',1.45,0],['고등어',.80,1],['감성돔',1.75,1],['농어',2.25,2]];
@@ -28,11 +29,12 @@ const Fishing=(()=>{
   }
   function build(){
     if(built)return;built=true;G.scene.add(group);group.name='fishing-pontoon';group.add(rig,float,fish);
-    for(let i=0;i<11;i++)mesh(new THREE.BoxGeometry(.25,.18,3.3),i%2?0x967658:0xb58d68,rig,(i-5)*.255,0,0);
+    for(let i=0;i<11;i++)mesh(new THREE.BoxGeometry(.25,.18,3.3),i%2?0x967658:0xb58d68,rig,(i-5)*.255,0,0).receiveShadow=true;
     for(const x of [-1.02,1.02]){const f=mesh(new THREE.CylinderGeometry(.31,.31,3.32,12),0x496b6b,rig,x,-.21,0);f.rotation.x=Math.PI/2;}
-    const shaft=mesh(new THREE.CylinderGeometry(.025,.049,.87,10),0x875731,rig,.48,.65,.43);shaft.rotation.x=.79;
-    mesh(new THREE.CylinderGeometry(.11,.11,.1,14),0x526369,rig,.53,.74,.5).rotation.z=Math.PI/2;
-    for(let i=0;i<8;i++)sections.push(mesh(new THREE.CylinderGeometry(.028-i*.0028,.032-i*.0028,1,8),i%3===0?0xc7a45f:0x314449,rig,0,0,0));
+    rig.add(handle);
+    mesh(new THREE.CylinderGeometry(.027,.036,.56,10),0x875731,handle,0,.02,0);
+    mesh(new THREE.CylinderGeometry(.082,.082,.105,14),0x526369,handle,.045,.13,-.067).rotation.z=Math.PI/2;
+    for(let i=0;i<8;i++)sections.push(mesh(new THREE.CylinderGeometry(.028-i*.0028,.032-i*.0028,1,8),i%3===0?0xc7a45f:0x314449,handle,0,0,0));
     line=cord(linePts,0xbddbd7,group);
     const bulb=mesh(new THREE.SphereGeometry(1,12,12),0xe6562d,float,0,.055,0);bulb.scale.set(.089,.12,.089);
     mesh(new THREE.CylinderGeometry(.022,.025,.30,8),0xffed9e,float,0,.24,0);
@@ -98,26 +100,35 @@ const Fishing=(()=>{
     }
     const sn=Math.sin(bearing),cs=Math.cos(bearing),surface=Sea.height(site.x,site.z),cast=stage==='cast'?clamp(age/.7):1;
     rig.position.set(site.x,surface+.13,site.z);rig.rotation.z=.018*Math.sin(elapsed*.9);
-    const reach=stage==='ready'?1.65:lerp(1.65,range,cast),tug=stage==='fight'?.45*Math.sin(age*4):0;
+    const flight=sm(.30,1,cast);
+    const reach=stage==='ready'?1.65:lerp(1.65,range,flight),tug=stage==='fight'?.45*Math.sin(age*4):0;
     const x=site.x+sn*reach+cs*tug,z=site.z+cs*reach-sn*tug;
-    floatAt.set(x,Sea.height(x,z)+(stage==='cast'?Math.sin(cast*Math.PI)*3.2:0),z);
+    floatAt.set(x,Sea.height(x,z)+(stage==='cast'?Math.sin(flight*Math.PI)*3.2:0),z);
     float.position.copy(floatAt);float.position.y+=stage==='bite'?-.16+.15*Math.cos(age*19):.04*Math.sin(elapsed*3.1);
     float.rotation.z=stage==='bite'?.39*Math.sin(age*17):.08*Math.sin(elapsed*2);
     const bend=stage==='fight'?tension*gear.flex:stage==='cast'?Math.sin(cast*Math.PI)*.42:0;
-    for(let i=0;i<9;i++){const u=i/8;rodPts.set([.48+sn*u*1.1,.92+u*1.25-bend*u*u,.72+cs*u*(1.35+bend*.4)],i*3);}
+    let pitch=.84+Math.sin(elapsed*1.6)*.018;
+    if(stage==='cast')pitch=.84-1.52*sm(0,.26,cast)+1.80*sm(.26,.57,cast)-.28*sm(.57,1,cast);
+    if(stage==='fight')pitch-=.33*sm(0,.2,age)+.12*Math.sin(age*4)*tension;
+    if(pull)crank+=dt*10;
+    FishingPose.step(dt,handle,bearing,pitch,crank);
+    for(let i=0;i<9;i++){const u=i/8;rodPts.set([0,.30+1.55*u-bend*.22*u*u,.09*u*u+bend*.67*u*u],i*3);}
     for(let i=0;i<sections.length;i++){const s=sections[i];a.fromArray(rodPts,i*3);b.fromArray(rodPts,(i+1)*3);
       s.position.copy(a).lerp(b,.5);axis.subVectors(b,a);s.scale.y=axis.length();s.quaternion.setFromUnitVectors(up,axis.normalize());}
-    tip.fromArray(rodPts,24);rig.localToWorld(tip);
+    tip.fromArray(rodPts,24);handle.localToWorld(tip);
     for(let i=0;i<13;i++){const u=i/12;linePts.set([lerp(tip.x,float.position.x,u),lerp(tip.y,float.position.y+.2,u)-Math.sin(u*Math.PI)*(stage==='fight'?.04:.20),lerp(tip.z,float.position.z,u)],i*3);}
     line.geometry.attributes.position.needsUpdate=true;ring.position.copy(floatAt);ring.position.y+=.048;
     ring.visible=stage==='bite'||stage==='fight';ring.scale.setScalar(.16+((elapsed*1.35)%1)*.68);
     fish.visible=stage==='fight';fish.position.copy(floatAt);fish.position.y-=.25;fish.rotation.y=bearing+Math.sin(age*7)*.68;
     fish.scale.setScalar(.71+.32*Math.sqrt(mass));const motion=matchMedia('(prefers-reduced-motion: reduce)').matches?.15:1;
-    camera.position.set(site.x+.28+Math.sin(elapsed*39)*shake*.055*motion,surface+2.22+Math.sin(elapsed*31)*shake*.043*motion,site.z-2.72);
-    aim.set(site.x+sn*reach*.78,surface+.35,site.z+Math.max(2.6,cs*reach*.78));camera.lookAt(aim);camera.fov=55;camera.near=.09;
+    const portrait=camera.aspect<1,side=portrait?-1.60:-2.65,back=portrait?4.65:3.50;
+    camera.position.set(site.x+cs*side-sn*back+Math.sin(elapsed*39)*shake*.055*motion,surface+2.03+Math.sin(elapsed*31)*shake*.043*motion,site.z-sn*side-cs*back);
+    const focus=Math.min(3,reach*(portrait?.15:.33));
+    aim.set(site.x+sn*focus,surface+.95,site.z+cs*focus);camera.lookAt(aim);camera.fov=portrait?61:53;camera.near=.09;
     return 'A/D 찌 방향 · Space 던지기/챔질 · 길게 누르거나 휠 위로 감기';
   }
-  Modes.add('fishing',{name:'바다낚시',enter(){build();active=group.visible=true;ui.hidden=false;endInput();change('ready');basket();},
-    leave(){active=group.visible=false;ui.hidden=true;endInput();},step},'Digit8','8');
+  Modes.add('fishing',{name:'바다낚시',enter(){build();active=group.visible=true;ui.hidden=false;endInput();change('ready');basket();
+      FishingPose.mount(rig).catch(()=>{if(active)el('state').textContent='낚시 캐릭터를 불러오지 못했습니다. 낚시 모드를 다시 열어 주세요.';});},
+    leave(){active=group.visible=false;ui.hidden=true;FishingPose.leave();endInput();},step},'Digit8','8');
   return {get position(){return site;},get float(){return stage==='ready'?null:floatAt;},get stage(){return stage;},get catches(){return catches;}};
 })();

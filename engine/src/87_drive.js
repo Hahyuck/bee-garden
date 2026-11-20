@@ -9,7 +9,7 @@ const Drive = (() => {
   const WL = [[.74, -.18, 1.22], [-.74, -.18, 1.22], [.74, -.18, -1.18], [-.74, -.18, -1.18]].map(a => V(...a));      // +X is the car's left, +Z its nose
   const MU = CC.grip, RR = CC.rolling, GEAR = CC.gears, FINAL = CC.finalDrive, REV = CC.reverse; let snowK = 0, iceK = 0;
   const car = { p: V(), q: new THREE.Quaternion(), v: V(), w: V(), comp: [0, 0, 0, 0], len: [.2, .2, .2, .2], spin: [0, 0, 0, 0], steer: 0, gear: 1, rpm: 900, slip: 0, thr: 0, air: 0, surf: 0, bad: 0 };
-  const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, keys = new Set(), gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
+  const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
   const touch = { acc: 0, brk: 0, st: 0, hb: 0 };
   const topSpeed = 160 / 3.6;
   let pedalWasDown = false;
@@ -89,7 +89,7 @@ const Drive = (() => {
     reset(RD.n - 6); if (typeof Phys !== 'undefined' && Phys.ready) { embody(); reset(RD.n - 6); }
   }
   function readInput() {
-    const down = code => keys.has(code) || Modes.keys.has(code);
+    const down = code => Modes.keys.has(code);
     let acc = down('KeyW') || down('ArrowUp') ? 1 : touch.acc, brk = down('KeyS') || down('ArrowDown') ? 1 : touch.brk, st = clamp(touch.st + Number(down('KeyA') || down('ArrowLeft')) - Number(down('KeyD') || down('ArrowRight')),-1,1), hb = down('Space') ? 1 : touch.hb, look = down('KeyB');
     const gp = navigator.getGamepads ? [...navigator.getGamepads()].find(g => g && g.mapping === 'standard') : null;
     if (gp) { const b = gp.buttons; acc = Math.max(acc, b[7].value); brk = Math.max(brk, b[6].value); if (Math.abs(gp.axes[0]) > .12) st = -gp.axes[0]; hb = Math.max(hb, b[0].pressed ? 1 : 0); look = look || b[5].pressed;
@@ -99,7 +99,9 @@ const Drive = (() => {
   const back = () => { const o = Island.nearRoad(car.p.x, car.p.z); reset(o.d < 1e8 ? o.i : lastI); };
   function setPaused(v) { paused = v; if (body) Phys.hold = v; menu.style.display = v ? 'flex' : 'none'; }
   function control(dt) {
-    const vf = car.v.dot(bz), spd = Math.abs(vf), lim = Math.min(CC.steerLock, CC.steerSpeedK / Math.max(spd * spd, 1)); car.steer += (inp.st * lim - car.steer) * (1 - Math.exp(-dt * (Math.abs(inp.st) > .05 ? 6 : 9)));      // the faster it goes, the less lock it is given
+    const vf = car.v.dot(bz), spd = Math.abs(vf);
+    const lock = CC.steerLock / (1 + spd / CC.steerHalfSpeed);
+    car.steer += (inp.st * lock - car.steer) * (1 - Math.exp(-dt * (Math.abs(inp.st) > .05 ? 8 : 11)));
     let thr = inp.acc, brk = inp.brk;
     if (car.gear > 0) { if (Math.abs(vf)<.6 && brk>.1 && !pedalWasDown && thr<.1 && !inp.hb) car.gear=-1; }
     else if (vf > -.8 && thr > .1 && brk < .1) car.gear = 1;
@@ -130,7 +132,14 @@ const Drive = (() => {
       const st = i < 2 ? car.steer : 0; wf.copy(bz).multiplyScalar(Math.cos(st)).addScaledVector(bx, Math.sin(st)); wf.addScaledVector(nrm, -wf.dot(nrm)).normalize(); ws.crossVectors(nrm, wf);
       const vl = vC.dot(wf), vs = vC.dot(ws), mu = Math.max(.1, MU[g[5]] * (g[5] === 0 ? 1 - CC.wetGripLoss * wet - CC.iceGripLoss * iceK : 1 - .3 * iceK) * (1 - CC.snowGripLoss * snowK)) * (i > 1 && car.drifting ? .43 : 1), al = Math.atan2(vs, Math.abs(vl) + 1.2);
       let Fy = -mu * Fz * Math.sin(1.5 * Math.atan(9 * al)), Fx = (i < 2 ? drive * .5 : 0) - clamp(vl * 6, -1, 1) * (brake * (i < 2 ? .31 : .19) + (i > 1 ? inp.hb * 2600 : 0)) - vl * (RR[g[5]] + CC.snowRolling * snowK);
-      const mag = Math.hypot(Fx, Fy), mx = mu * Fz; if (mag > mx) { Fx *= mx / mag; Fy *= mx / mag; }
+      const mag = Math.hypot(Fx, Fy), mx = mu * Fz;
+      if (mag > mx) {
+        if (i < 2 && car.thr > 0 && !car.drifting) {
+          // Give the steering tyres lateral grip first, then apply the available drive force.
+          const traction = Math.sqrt(Math.max(0, mx * mx - Fy * Fy));
+          Fx = clamp(Fx, -traction, traction);
+        } else { Fx *= mx / mag; Fy *= mx / mag; }
+      }
       slip += Math.min(1, Math.abs(al) * 3 + (mag > mx ? .3 : 0)) * Math.min(1, Math.abs(vl) / 6 + Math.abs(vs) / 3);
       f.copy(nrm).multiplyScalar(Fz).addScaledVector(wf, Fx).addScaledVector(ws, Fy); F.add(f); if (!body) r.y *= .45; Tq.add(tmp.crossVectors(r, f)); car.spin[i] += vl / RAD * h; }
     if(car.drifting)Tq.addScaledVector(by,inp.st*Math.sign(car.v.dot(bz))*IY*.77);
@@ -157,7 +166,7 @@ const Drive = (() => {
       if (body) { pull(); limitSpeed(); } bx.set(1, 0, 0).applyQuaternion(car.q); by.set(0, 1, 0).applyQuaternion(car.q); bz.set(0, 0, 1).applyQuaternion(car.q); control(dt);
       for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z); const s0 = Island.surf(A.x, A.z), y0 = s0[0], ty = s0[1];
         g[0] = y0; g[1] = (Island.surf(A.x + .4, A.z)[0] - y0) / .4; g[2] = (Island.surf(A.x, A.z + .4)[0] - y0) / .4; g[3] = A.x; g[4] = A.z; g[5] = ty; if (i === 0) car.surf = ty; }
-      if (!body) { const n = clamp(Math.ceil(dt * 240), 1, 12), h = dt / n; for (let i = 0; i < n; i++) sub(h); }
+      if (!body && dt > 0) { const n = clamp(Math.ceil(dt * 240), 1, 12), h = dt / n; for (let i = 0; i < n; i++) sub(h); }
       const road = Island.nearRoad(car.p.x, car.p.z); car.off = road.d; if(road.d < 60) lastI = road.i;
       if (body) { hitT -= dt; const dv = tmp.copy(car.v).sub(vPrev).length(); vPrev.copy(car.v); if (dv > 2.2 && hitT <= 0) { Phys.thump(Math.min(1, dv / 9)); hitT = .22; } }      // a jolt in the velocity is a hit: let it be heard
       const sunk = car.p.y < .6 && Island.surf(car.p.x, car.p.z)[0] < -.6; car.bad = by.y < .3 || (!body && car.p.y < -1.2) ? car.bad + dt : sunk ? car.bad + dt * .4 : 0; if (car.bad > 1.6 || !isFinite(car.p.x) || car.p.y < -6) back(); }
@@ -177,7 +186,7 @@ const Drive = (() => {
     hud.textContent=String(kmh).padStart(3,'0')+' km/h   '+(car.gear<0?'R':'D'+car.gear)+'\n'+state+'  '+bar+(car.off>9?'\nR  도로로 복귀':'');
     sound(); return ['아스팔트', '갓길', '풀밭', '모래'][car.surf] + (iceK > .3 ? ' · 빙판' : snowK > .3 ? ' · 눈길' : wet > .3 ? ' · 젖음' : '') + ' · C 카메라 · Esc 조작법';
   }
-  function enter() { on = true; grp.visible = true; if (body) { body.setEnabled(true); Phys.prime(car.p.x, car.p.z); } hud.style.display = ''; keys.clear(); camInit = false; }
+  function enter() { on = true; grp.visible = true; if (body) { body.setEnabled(true); Phys.prime(car.p.x, car.p.z); } hud.style.display = ''; camInit = false; }
   function park() {
     reset(RD.n-6); grp.visible = true; grp.position.copy(car.p); grp.quaternion.copy(car.q);
     for (let i=0;i<wheels.length;i++) {
@@ -190,15 +199,14 @@ const Drive = (() => {
   }
   function finish() {
     on=false; if(body) body.setEnabled(false);
-    hud.style.display='none'; setPaused(false); keys.clear();
+    hud.style.display='none'; setPaused(false); Modes.keys.clear();
     Object.assign(touch,{acc:0,brk:0,st:0,hb:0}); sound();
   }
   function leave() { finish(); grp.visible=false; doorHinge.rotation.y=0; }
-  addEventListener('keydown', e => { if (!on || e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code);
+  addEventListener('keydown', e => { if (!on || e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.('input,select,textarea,button,dialog[open]')) return;
     if (e.code === 'KeyC' && !e.repeat) { camMode = (camMode + 1) % 3; camInit = false; } else if (e.code === 'KeyR' && !e.repeat) back(); else if (e.code === 'Escape') setPaused(!paused);
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); });
-  addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
-  return { build, step, enter, leave, finish, park, reset, car, inp, keys, touch,
+  return { build, step, enter, leave, finish, park, reset, car, inp, get keys(){return Modes.keys;}, touch,
     setDoor(open) { doorHinge.rotation.y=-1.39*clamp(open); },
     get on() { return on; }, get body() { return body; }, get paused() { return paused; },get cockpit(){return camMode===2;},
     recover:back };

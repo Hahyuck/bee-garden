@@ -5198,7 +5198,7 @@ const CFG = {
     rolling: [14, 70, 110, 190],
     gears: [0, 3.55, 2.05, 1.42, 1.08, .86], finalDrive: 3.9, reverse: 3.4,
     torque: 168, brake: 9500, drag: .42,
-    steerLock: .56, steerSpeedK: 31,
+    steerLock: .56, steerHalfSpeed: 8,  // radians at parking speed; m/s at half lock
     wetGripLoss: .2, iceGripLoss: .65, snowGripLoss: .45, snowRolling: 60,
   },
 };
@@ -5225,6 +5225,7 @@ vec3 skyCol(vec3 d, float sun){
 const Sky = (() => {
   const C = CFG.sky, U = { uSkySun: { value: new THREE.Vector3(0, 1, 0) }, uSkyK: { value: new THREE.Vector3(1, 1, 1) }, uZen: { value: new THREE.Vector3() }, uHor: { value: new THREE.Vector3() }, uSkyP: { value: new THREE.Vector4(.3, 0, 0, 0) } };
   const sunDir = new THREE.Vector3(), light = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3(); let dome, sun, hemi, drift = 0, flow = !Q.has('still');
+  const moon = new THREE.Vector3(.58, .66, .46).normalize();
   if (Q.get('day')) G.day = +Q.get('day');
   const mix3 = (o, a, b, t) => o.set(lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t));
 
@@ -5251,7 +5252,7 @@ const Sky = (() => {
     const sunI = sm(-.03, .12, y) * (1 - .78 * storm) * (1 - .35 * cover * (1 - storm)), moonI = sm(.04, .2, -y) * .05 * (1 - .6 * storm);
     mix3(_a, [1, .4, .14], [1, .95, .86], sm(.0, .36, y)); U.uSkySun.value.copy(sunDir); U.uSkyK.value.copy(_a).multiplyScalar(sm(-.08, .1, y));
     if (sunI > moonI) { light.copy(sunDir); if (light.y < .06) { light.y = .06; light.normalize(); } sun.color.setRGB(_a.x, _a.y, _a.z); sun.intensity = C.sunIntensity * sunI; }
-    else { light.set(-sunDir.x, Math.max(-sunDir.y, .25), -sunDir.z).normalize(); sun.color.setRGB(.55, .68, 1); sun.intensity = C.sunIntensity * moonI; }
+    else { light.copy(moon); sun.color.setRGB(.55, .68, 1); sun.intensity = C.sunIntensity * moonI; }
     hemi.color.setRGB(U.uZen.value.x * .9 + U.uHor.value.x * .35, U.uZen.value.y * .9 + U.uHor.value.y * .35, U.uZen.value.z * .9 + U.uHor.value.z * .35); hemi.groundColor.setRGB(.2, .19, .11).multiplyScalar(.25 + .75 * day);
     hemi.intensity = C.fillIntensity * (.1 + .9 * day) * (1 - .3 * storm);
     // the air takes the horizon's colour, and thickens in rain and snow
@@ -6748,7 +6749,7 @@ void main(){ vec2 uv = vUv;
     const bl = (from, to, x, y) => { M.blur.uniforms.tC.value = from.texture; M.blur.uniforms.uDir.value.set(x, y); pass(M.blur, to); };
     bl(b1a, b1b, 1 / b1a.width, 0); bl(b1b, b1a, 0, 1 / b1a.height); bl(b1a, b2b, 1 / b2a.width, 0); bl(b2b, b2a, 0, 1 / b2a.height);
     const f = M.fin.uniforms; f.tC.value = src.texture; f.tB1.value = b1a.texture; f.tB2.value = b2a.texture; f.uExp.value = exp; f.uAspect.value = W / H; f.tD.value = rtMain.depthTexture; f.uEye.value = lens.eye; f.uRes.value.set(W, H); f.uBloom.value = G.look.bloom ? C.bloom : 0; f.uFilm.value = G.look.film ? 1 : 0;
-    f.uGrain.value=PixelFit.enabled?0:C.grain;
+    f.uGrain.value=PixelFit.enabled||VisualStyle.usesRaster()?0:C.grain;
     f.uWaterClip ??= {value:new THREE.Vector3()};
     f.uWaterClip.value.set(Modes.cur==='sub'?Math.max(0,CFG.sea.level-camera.position.y):0,camera.near,camera.far);
     // where the sun is on the screen, and whether its shafts can be seen: low sun, in front of the lens, not behind a storm
@@ -7034,9 +7035,13 @@ const PixelFit=(()=>{
 
 const VisualStyle=(()=>{
   const sizes=[[240,160],[360,240],[480,320],[600,400],[720,480]];
-  const names={native:'3D',diorama:'디오라마',pixel:'픽셀',gaussian:'가우시안',
-    'yeoul-2d':'여울 2D · 단색 도트','yeoul-25d':'여울 2.5D · 디더링','yeoul-3d':'흑연명암 3D',
-    'cradle-2d':'AI요람 2D · 클린 도트','cradle-25d':'AI요람 2.5D · HD-2D 라이트','cradle-3d':'클릭픽셀 3D'};
+  const groups={pixel:'픽셀','2d':'2D','25d':'2.5D',native:'3D','cradle-3d':'클린 픽셀 3D','yeoul-3d':'흑연명암 3D',diorama:'디오라마',gaussian:'가우시안'};
+  const variants={'2d':{'cradle-2d':'클린 도트','yeoul-2d':'단색 도트'},'25d':{'cradle-25d':'HD-2D 라이트','yeoul-25d':'디더링'}};
+  const names={};
+  for(const [group,label] of Object.entries(groups)){
+    if(variants[group])for(const [id,name] of Object.entries(variants[group]))names[id]=label+' · '+name;
+    else names[group]=label;
+  }
   let mode='native', raster=240, target=null, display=null;
   const camera=new THREE.OrthographicCamera(-1,1,1,-1,0,1),scene=new THREE.Scene();
   const focus=new THREE.Vector3(),diagonal=new THREE.Vector3(14,12,-17),flat=new THREE.Vector3(0,27,40);
@@ -7175,7 +7180,7 @@ const VisualStyle=(()=>{
   PixelFit.select(Q.get('pixelFit'));
   function walkYaw(){const offset=fixedView();return offset&&ActorWalk.thirdPerson?Math.atan2(offset.x,offset.z)+yaw:null;}
   function renderCamera(camera){return PixelFit.snapped(camera,subject(),mode+'/'+Modes.cur);}
-  return {names,sizes,select,frame,output,present,renderCamera,usesRaster,walkYaw,makeFilter,configureFilter,get current(){return mode;},get raster(){return raster;}};
+  return {groups,variants,names,sizes,select,frame,output,present,renderCamera,usesRaster,walkYaw,makeFilter,configureFilter,get current(){return mode;},get raster(){return raster;}};
 })();
 
 // ===== 84_lookpanel.js =====
@@ -7476,7 +7481,7 @@ const Drive = (() => {
   const WL = [[.74, -.18, 1.22], [-.74, -.18, 1.22], [.74, -.18, -1.18], [-.74, -.18, -1.18]].map(a => V(...a));      // +X is the car's left, +Z its nose
   const MU = CC.grip, RR = CC.rolling, GEAR = CC.gears, FINAL = CC.finalDrive, REV = CC.reverse; let snowK = 0, iceK = 0;
   const car = { p: V(), q: new THREE.Quaternion(), v: V(), w: V(), comp: [0, 0, 0, 0], len: [.2, .2, .2, .2], spin: [0, 0, 0, 0], steer: 0, gear: 1, rpm: 900, slip: 0, thr: 0, air: 0, surf: 0, bad: 0 };
-  const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, keys = new Set(), gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
+  const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
   const touch = { acc: 0, brk: 0, st: 0, hb: 0 };
   const topSpeed = 160 / 3.6;
   let pedalWasDown = false;
@@ -7556,7 +7561,7 @@ const Drive = (() => {
     reset(RD.n - 6); if (typeof Phys !== 'undefined' && Phys.ready) { embody(); reset(RD.n - 6); }
   }
   function readInput() {
-    const down = code => keys.has(code) || Modes.keys.has(code);
+    const down = code => Modes.keys.has(code);
     let acc = down('KeyW') || down('ArrowUp') ? 1 : touch.acc, brk = down('KeyS') || down('ArrowDown') ? 1 : touch.brk, st = clamp(touch.st + Number(down('KeyA') || down('ArrowLeft')) - Number(down('KeyD') || down('ArrowRight')),-1,1), hb = down('Space') ? 1 : touch.hb, look = down('KeyB');
     const gp = navigator.getGamepads ? [...navigator.getGamepads()].find(g => g && g.mapping === 'standard') : null;
     if (gp) { const b = gp.buttons; acc = Math.max(acc, b[7].value); brk = Math.max(brk, b[6].value); if (Math.abs(gp.axes[0]) > .12) st = -gp.axes[0]; hb = Math.max(hb, b[0].pressed ? 1 : 0); look = look || b[5].pressed;
@@ -7566,7 +7571,9 @@ const Drive = (() => {
   const back = () => { const o = Island.nearRoad(car.p.x, car.p.z); reset(o.d < 1e8 ? o.i : lastI); };
   function setPaused(v) { paused = v; if (body) Phys.hold = v; menu.style.display = v ? 'flex' : 'none'; }
   function control(dt) {
-    const vf = car.v.dot(bz), spd = Math.abs(vf), lim = Math.min(CC.steerLock, CC.steerSpeedK / Math.max(spd * spd, 1)); car.steer += (inp.st * lim - car.steer) * (1 - Math.exp(-dt * (Math.abs(inp.st) > .05 ? 6 : 9)));      // the faster it goes, the less lock it is given
+    const vf = car.v.dot(bz), spd = Math.abs(vf);
+    const lock = CC.steerLock / (1 + spd / CC.steerHalfSpeed);
+    car.steer += (inp.st * lock - car.steer) * (1 - Math.exp(-dt * (Math.abs(inp.st) > .05 ? 8 : 11)));
     let thr = inp.acc, brk = inp.brk;
     if (car.gear > 0) { if (Math.abs(vf)<.6 && brk>.1 && !pedalWasDown && thr<.1 && !inp.hb) car.gear=-1; }
     else if (vf > -.8 && thr > .1 && brk < .1) car.gear = 1;
@@ -7597,7 +7604,14 @@ const Drive = (() => {
       const st = i < 2 ? car.steer : 0; wf.copy(bz).multiplyScalar(Math.cos(st)).addScaledVector(bx, Math.sin(st)); wf.addScaledVector(nrm, -wf.dot(nrm)).normalize(); ws.crossVectors(nrm, wf);
       const vl = vC.dot(wf), vs = vC.dot(ws), mu = Math.max(.1, MU[g[5]] * (g[5] === 0 ? 1 - CC.wetGripLoss * wet - CC.iceGripLoss * iceK : 1 - .3 * iceK) * (1 - CC.snowGripLoss * snowK)) * (i > 1 && car.drifting ? .43 : 1), al = Math.atan2(vs, Math.abs(vl) + 1.2);
       let Fy = -mu * Fz * Math.sin(1.5 * Math.atan(9 * al)), Fx = (i < 2 ? drive * .5 : 0) - clamp(vl * 6, -1, 1) * (brake * (i < 2 ? .31 : .19) + (i > 1 ? inp.hb * 2600 : 0)) - vl * (RR[g[5]] + CC.snowRolling * snowK);
-      const mag = Math.hypot(Fx, Fy), mx = mu * Fz; if (mag > mx) { Fx *= mx / mag; Fy *= mx / mag; }
+      const mag = Math.hypot(Fx, Fy), mx = mu * Fz;
+      if (mag > mx) {
+        if (i < 2 && car.thr > 0 && !car.drifting) {
+          // Give the steering tyres lateral grip first, then apply the available drive force.
+          const traction = Math.sqrt(Math.max(0, mx * mx - Fy * Fy));
+          Fx = clamp(Fx, -traction, traction);
+        } else { Fx *= mx / mag; Fy *= mx / mag; }
+      }
       slip += Math.min(1, Math.abs(al) * 3 + (mag > mx ? .3 : 0)) * Math.min(1, Math.abs(vl) / 6 + Math.abs(vs) / 3);
       f.copy(nrm).multiplyScalar(Fz).addScaledVector(wf, Fx).addScaledVector(ws, Fy); F.add(f); if (!body) r.y *= .45; Tq.add(tmp.crossVectors(r, f)); car.spin[i] += vl / RAD * h; }
     if(car.drifting)Tq.addScaledVector(by,inp.st*Math.sign(car.v.dot(bz))*IY*.77);
@@ -7624,7 +7638,7 @@ const Drive = (() => {
       if (body) { pull(); limitSpeed(); } bx.set(1, 0, 0).applyQuaternion(car.q); by.set(0, 1, 0).applyQuaternion(car.q); bz.set(0, 0, 1).applyQuaternion(car.q); control(dt);
       for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z); const s0 = Island.surf(A.x, A.z), y0 = s0[0], ty = s0[1];
         g[0] = y0; g[1] = (Island.surf(A.x + .4, A.z)[0] - y0) / .4; g[2] = (Island.surf(A.x, A.z + .4)[0] - y0) / .4; g[3] = A.x; g[4] = A.z; g[5] = ty; if (i === 0) car.surf = ty; }
-      if (!body) { const n = clamp(Math.ceil(dt * 240), 1, 12), h = dt / n; for (let i = 0; i < n; i++) sub(h); }
+      if (!body && dt > 0) { const n = clamp(Math.ceil(dt * 240), 1, 12), h = dt / n; for (let i = 0; i < n; i++) sub(h); }
       const road = Island.nearRoad(car.p.x, car.p.z); car.off = road.d; if(road.d < 60) lastI = road.i;
       if (body) { hitT -= dt; const dv = tmp.copy(car.v).sub(vPrev).length(); vPrev.copy(car.v); if (dv > 2.2 && hitT <= 0) { Phys.thump(Math.min(1, dv / 9)); hitT = .22; } }      // a jolt in the velocity is a hit: let it be heard
       const sunk = car.p.y < .6 && Island.surf(car.p.x, car.p.z)[0] < -.6; car.bad = by.y < .3 || (!body && car.p.y < -1.2) ? car.bad + dt : sunk ? car.bad + dt * .4 : 0; if (car.bad > 1.6 || !isFinite(car.p.x) || car.p.y < -6) back(); }
@@ -7644,7 +7658,7 @@ const Drive = (() => {
     hud.textContent=String(kmh).padStart(3,'0')+' km/h   '+(car.gear<0?'R':'D'+car.gear)+'\n'+state+'  '+bar+(car.off>9?'\nR  도로로 복귀':'');
     sound(); return ['아스팔트', '갓길', '풀밭', '모래'][car.surf] + (iceK > .3 ? ' · 빙판' : snowK > .3 ? ' · 눈길' : wet > .3 ? ' · 젖음' : '') + ' · C 카메라 · Esc 조작법';
   }
-  function enter() { on = true; grp.visible = true; if (body) { body.setEnabled(true); Phys.prime(car.p.x, car.p.z); } hud.style.display = ''; keys.clear(); camInit = false; }
+  function enter() { on = true; grp.visible = true; if (body) { body.setEnabled(true); Phys.prime(car.p.x, car.p.z); } hud.style.display = ''; camInit = false; }
   function park() {
     reset(RD.n-6); grp.visible = true; grp.position.copy(car.p); grp.quaternion.copy(car.q);
     for (let i=0;i<wheels.length;i++) {
@@ -7657,15 +7671,14 @@ const Drive = (() => {
   }
   function finish() {
     on=false; if(body) body.setEnabled(false);
-    hud.style.display='none'; setPaused(false); keys.clear();
+    hud.style.display='none'; setPaused(false); Modes.keys.clear();
     Object.assign(touch,{acc:0,brk:0,st:0,hb:0}); sound();
   }
   function leave() { finish(); grp.visible=false; doorHinge.rotation.y=0; }
-  addEventListener('keydown', e => { if (!on || e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code);
+  addEventListener('keydown', e => { if (!on || e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.('input,select,textarea,button,dialog[open]')) return;
     if (e.code === 'KeyC' && !e.repeat) { camMode = (camMode + 1) % 3; camInit = false; } else if (e.code === 'KeyR' && !e.repeat) back(); else if (e.code === 'Escape') setPaused(!paused);
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); });
-  addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
-  return { build, step, enter, leave, finish, park, reset, car, inp, keys, touch,
+  return { build, step, enter, leave, finish, park, reset, car, inp, get keys(){return Modes.keys;}, touch,
     setDoor(open) { doorHinge.rotation.y=-1.39*clamp(open); },
     get on() { return on; }, get body() { return body; }, get paused() { return paused; },get cockpit(){return camMode===2;},
     recover:back };
@@ -7788,7 +7801,10 @@ const Modes = (() => {
   function set(name,restart=false) { if (name==='hike') name='fps'; if (!MODES[name] || (name === cur&&!restart)) return; keys.clear(); MODES[cur].leave(); if (cur !== 'free' && cur !== 'drive') fly.p.copy(G.camera.position); cur = name; picker.value=cur; MODES[cur].enter(); hudAt = 0; }
   // the shadow map: a box around the lens, snapped to its own texels so it does not swim; small for the bee, wide from the air
   const SHP = [[310, 520, 20, 1100, -.00035, .22], [75, 260, 1, 520, -.00008, .07], [7, 40, 1, 80, -.00004, .0025], [24, 100, 1, 205, -.000035, .009]], SR = new THREE.Vector3(), SU = new THREE.Vector3(); let shMode = -1;
-  function shadows(camera, k) { const sun = G.sun, sc = sun.shadow.camera, p = SHP[k], S = Sky.light; q.setFromRotationMatrix(m.lookAt(S, P.set(0, 0, 0), UP)); SR.set(1, 0, 0).applyQuaternion(q); SU.set(0, 1, 0).applyQuaternion(q);
+  function shadows(camera) {
+    const high = camera.position.y - Math.max(Island.surf(camera.position.x, camera.position.z)[0], 0);
+    const k = cur === 'bee' && !(window.__cam || dbg) ? 2 : high>45 ? 0 : high<8 && ['actors','fps','drive','flight','fishing','sample'].includes(cur) ? 3 : 1;
+    const sun = G.sun, sc = sun.shadow.camera, p = SHP[k], S = Sky.light; q.setFromRotationMatrix(m.lookAt(S, P.set(0, 0, 0), UP)); SR.set(1, 0, 0).applyQuaternion(q); SU.set(0, 1, 0).applyQuaternion(q);
     if (k !== shMode) { shMode = k; sc.left = sc.bottom = -p[0]; sc.right = sc.top = p[0]; sc.near = p[2]; sc.far = p[3]; sc.updateProjectionMatrix(); sun.shadow.bias = p[4]; sun.shadow.normalBias = p[5]; }
     const ts = 2 * p[0] / sun.shadow.mapSize.x, cp = camera.position; c.set(0, 0, 0).addScaledVector(SR, Math.round(cp.dot(SR) / ts) * ts).addScaledVector(SU, Math.round(cp.dot(SU) / ts) * ts).addScaledVector(S, cp.dot(S));
     sun.target.position.copy(c); sun.position.copy(c).addScaledVector(S, p[1]); sun.target.updateMatrixWorld(); sun.updateMatrixWorld(); }
@@ -7798,7 +7814,6 @@ const Modes = (() => {
     camera.near = .3; Post.lens.aperture = 0; Post.lens.focus = 10; Post.lens.fisheye = false; if (cur !== 'bee') Post.lens.eye = 0; let line;
     const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); camera.fov = fix[6] || CC.fov; camera.near = fix[7] || .3; line = ''; }
     else line = MODES[cur].step(camera, dt);
-    const high = camera.position.y - Math.max(Island.surf(camera.position.x, camera.position.z)[0], 0); shadows(camera, cur === 'bee' && !fix ? 2 : high>45 ? 0 : high<8 && ['actors','fps','drive','flight','sample'].includes(cur) ? 3 : 1);
     if (performance.now() - hudAt > 250) {
       hudAt = performance.now();
       hud.id='mode-hint';hud.textContent=line;
@@ -7826,7 +7841,7 @@ const Modes = (() => {
   document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)release();});
   addEventListener('blur',release);addEventListener('pagehide',release);
   document.addEventListener('visibilitychange', () => { if (document.hidden) keys.clear(); });
-  return { step, set, add, visitOutcrop, MODES, fly, keys, get cur() { return cur; } };
+  return { step, shadows, set, add, visitOutcrop, MODES, fly, keys, get cur() { return cur; } };
 })();
 
 // ===== 88_touchstick.js =====
@@ -8481,6 +8496,7 @@ function makeFishSchools(reef,floor,harbor){
 const Fishing=(()=>{
   const site=new THREE.Vector3(94,0,-550),floatAt=new THREE.Vector3(),tip=new THREE.Vector3(),aim=new THREE.Vector3();
   const group=new THREE.Group(),rig=new THREE.Group(),float=new THREE.Group(),fish=new THREE.Group();
+  const handle=new THREE.Group();handle.name='fishing-rod-grip';let crank=0;
   const rods=[{name:'연질대',range:9,power:2.9,flex:1.3},{name:'만능대',range:13,power:3.9,flex:1},{name:'원투대',range:18,power:4.9,flex:.7}];
   const baits=['곡물 떡밥','크릴 떡밥','오징어살'];
   const species=[['망상어',.22,0],['숭어',1.45,0],['고등어',.80,1],['감성돔',1.75,1],['농어',2.25,2]];
@@ -8507,11 +8523,12 @@ const Fishing=(()=>{
   }
   function build(){
     if(built)return;built=true;G.scene.add(group);group.name='fishing-pontoon';group.add(rig,float,fish);
-    for(let i=0;i<11;i++)mesh(new THREE.BoxGeometry(.25,.18,3.3),i%2?0x967658:0xb58d68,rig,(i-5)*.255,0,0);
+    for(let i=0;i<11;i++)mesh(new THREE.BoxGeometry(.25,.18,3.3),i%2?0x967658:0xb58d68,rig,(i-5)*.255,0,0).receiveShadow=true;
     for(const x of [-1.02,1.02]){const f=mesh(new THREE.CylinderGeometry(.31,.31,3.32,12),0x496b6b,rig,x,-.21,0);f.rotation.x=Math.PI/2;}
-    const shaft=mesh(new THREE.CylinderGeometry(.025,.049,.87,10),0x875731,rig,.48,.65,.43);shaft.rotation.x=.79;
-    mesh(new THREE.CylinderGeometry(.11,.11,.1,14),0x526369,rig,.53,.74,.5).rotation.z=Math.PI/2;
-    for(let i=0;i<8;i++)sections.push(mesh(new THREE.CylinderGeometry(.028-i*.0028,.032-i*.0028,1,8),i%3===0?0xc7a45f:0x314449,rig,0,0,0));
+    rig.add(handle);
+    mesh(new THREE.CylinderGeometry(.027,.036,.56,10),0x875731,handle,0,.02,0);
+    mesh(new THREE.CylinderGeometry(.082,.082,.105,14),0x526369,handle,.045,.13,-.067).rotation.z=Math.PI/2;
+    for(let i=0;i<8;i++)sections.push(mesh(new THREE.CylinderGeometry(.028-i*.0028,.032-i*.0028,1,8),i%3===0?0xc7a45f:0x314449,handle,0,0,0));
     line=cord(linePts,0xbddbd7,group);
     const bulb=mesh(new THREE.SphereGeometry(1,12,12),0xe6562d,float,0,.055,0);bulb.scale.set(.089,.12,.089);
     mesh(new THREE.CylinderGeometry(.022,.025,.30,8),0xffed9e,float,0,.24,0);
@@ -8577,28 +8594,109 @@ const Fishing=(()=>{
     }
     const sn=Math.sin(bearing),cs=Math.cos(bearing),surface=Sea.height(site.x,site.z),cast=stage==='cast'?clamp(age/.7):1;
     rig.position.set(site.x,surface+.13,site.z);rig.rotation.z=.018*Math.sin(elapsed*.9);
-    const reach=stage==='ready'?1.65:lerp(1.65,range,cast),tug=stage==='fight'?.45*Math.sin(age*4):0;
+    const flight=sm(.30,1,cast);
+    const reach=stage==='ready'?1.65:lerp(1.65,range,flight),tug=stage==='fight'?.45*Math.sin(age*4):0;
     const x=site.x+sn*reach+cs*tug,z=site.z+cs*reach-sn*tug;
-    floatAt.set(x,Sea.height(x,z)+(stage==='cast'?Math.sin(cast*Math.PI)*3.2:0),z);
+    floatAt.set(x,Sea.height(x,z)+(stage==='cast'?Math.sin(flight*Math.PI)*3.2:0),z);
     float.position.copy(floatAt);float.position.y+=stage==='bite'?-.16+.15*Math.cos(age*19):.04*Math.sin(elapsed*3.1);
     float.rotation.z=stage==='bite'?.39*Math.sin(age*17):.08*Math.sin(elapsed*2);
     const bend=stage==='fight'?tension*gear.flex:stage==='cast'?Math.sin(cast*Math.PI)*.42:0;
-    for(let i=0;i<9;i++){const u=i/8;rodPts.set([.48+sn*u*1.1,.92+u*1.25-bend*u*u,.72+cs*u*(1.35+bend*.4)],i*3);}
+    let pitch=.84+Math.sin(elapsed*1.6)*.018;
+    if(stage==='cast')pitch=.84-1.52*sm(0,.26,cast)+1.80*sm(.26,.57,cast)-.28*sm(.57,1,cast);
+    if(stage==='fight')pitch-=.33*sm(0,.2,age)+.12*Math.sin(age*4)*tension;
+    if(pull)crank+=dt*10;
+    FishingPose.step(dt,handle,bearing,pitch,crank);
+    for(let i=0;i<9;i++){const u=i/8;rodPts.set([0,.30+1.55*u-bend*.22*u*u,.09*u*u+bend*.67*u*u],i*3);}
     for(let i=0;i<sections.length;i++){const s=sections[i];a.fromArray(rodPts,i*3);b.fromArray(rodPts,(i+1)*3);
       s.position.copy(a).lerp(b,.5);axis.subVectors(b,a);s.scale.y=axis.length();s.quaternion.setFromUnitVectors(up,axis.normalize());}
-    tip.fromArray(rodPts,24);rig.localToWorld(tip);
+    tip.fromArray(rodPts,24);handle.localToWorld(tip);
     for(let i=0;i<13;i++){const u=i/12;linePts.set([lerp(tip.x,float.position.x,u),lerp(tip.y,float.position.y+.2,u)-Math.sin(u*Math.PI)*(stage==='fight'?.04:.20),lerp(tip.z,float.position.z,u)],i*3);}
     line.geometry.attributes.position.needsUpdate=true;ring.position.copy(floatAt);ring.position.y+=.048;
     ring.visible=stage==='bite'||stage==='fight';ring.scale.setScalar(.16+((elapsed*1.35)%1)*.68);
     fish.visible=stage==='fight';fish.position.copy(floatAt);fish.position.y-=.25;fish.rotation.y=bearing+Math.sin(age*7)*.68;
     fish.scale.setScalar(.71+.32*Math.sqrt(mass));const motion=matchMedia('(prefers-reduced-motion: reduce)').matches?.15:1;
-    camera.position.set(site.x+.28+Math.sin(elapsed*39)*shake*.055*motion,surface+2.22+Math.sin(elapsed*31)*shake*.043*motion,site.z-2.72);
-    aim.set(site.x+sn*reach*.78,surface+.35,site.z+Math.max(2.6,cs*reach*.78));camera.lookAt(aim);camera.fov=55;camera.near=.09;
+    const portrait=camera.aspect<1,side=portrait?-1.60:-2.65,back=portrait?4.65:3.50;
+    camera.position.set(site.x+cs*side-sn*back+Math.sin(elapsed*39)*shake*.055*motion,surface+2.03+Math.sin(elapsed*31)*shake*.043*motion,site.z-sn*side-cs*back);
+    const focus=Math.min(3,reach*(portrait?.15:.33));
+    aim.set(site.x+sn*focus,surface+.95,site.z+cs*focus);camera.lookAt(aim);camera.fov=portrait?61:53;camera.near=.09;
     return 'A/D 찌 방향 · Space 던지기/챔질 · 길게 누르거나 휠 위로 감기';
   }
-  Modes.add('fishing',{name:'바다낚시',enter(){build();active=group.visible=true;ui.hidden=false;endInput();change('ready');basket();},
-    leave(){active=group.visible=false;ui.hidden=true;endInput();},step},'Digit8','8');
+  Modes.add('fishing',{name:'바다낚시',enter(){build();active=group.visible=true;ui.hidden=false;endInput();change('ready');basket();
+      FishingPose.mount(rig).catch(()=>{if(active)el('state').textContent='낚시 캐릭터를 불러오지 못했습니다. 낚시 모드를 다시 열어 주세요.';});},
+    leave(){active=group.visible=false;ui.hidden=true;FishingPose.leave();endInput();},step},'Digit8','8');
   return {get position(){return site;},get float(){return stage==='ready'?null:floatAt;},get stage(){return stage;},get catches(){return catches;}};
+})();
+
+// ===== 89_fishing_pose.js =====
+
+const FishingPose=(()=>{
+  const holder=new THREE.Group();
+  holder.name='angler';holder.position.set(0,.09,-.55);
+  let actor=null,entry,version=0,arms=[],height=1.71;
+  const shoulder=new THREE.Vector3(),elbow=new THREE.Vector3(),hand=new THREE.Vector3(),goal=new THREE.Vector3();
+  const reach=new THREE.Vector3(),pole=new THREE.Vector3(),joint=new THREE.Vector3();
+  const start=new THREE.Vector3(),from=new THREE.Vector3(),to=new THREE.Vector3(),palm=new THREE.Vector3();
+  const rotation=new THREE.Quaternion(),parentRotation=new THREE.Quaternion();
+  function bind(model,side){
+    let wrist;model.traverse(o=>{if(o.isBone&&o.name.toLowerCase().endsWith(side+'hand'))wrist=o;});
+    if(!wrist?.parent?.parent?.isBone)return null;
+    const lower=wrist.parent,upper=lower.parent;
+    const finger=wrist.children.find(o=>o.isBone&&/middle|index/i.test(o.name));
+    const grip=finger?finger.position.clone().multiplyScalar(.66):new THREE.Vector3();
+    return {wrist,lower,upper,grip,restUpper:upper.quaternion.clone(),restLower:lower.quaternion.clone()};
+  }
+  async function mount(deck){
+    deck.add(holder);const requested=ActorWalk.anglerEntry;
+    if(actor&&entry===requested)return;
+    const token=++version;
+    let next=await ActorWalk.loadActor(requested);
+    if(token!==version){ActorWalk.releaseActor(next);return;}
+    let pair=['right','left'].map(s=>bind(next.model,s));
+    if(pair.some(a=>!a)&&requested){
+      ActorWalk.releaseActor(next);next=await ActorWalk.loadActor(null);
+      if(token!==version){ActorWalk.releaseActor(next);return;}
+      pair=['right','left'].map(s=>bind(next.model,s));
+    }
+    ActorWalk.releaseActor(actor);actor=next;entry=requested;arms=pair;height=next.entry?.height||1.71;
+    next.holder.name='fishing-character';holder.add(next.holder);
+  }
+  function pointBone(bone,childWorld,target){
+    bone.getWorldPosition(start);
+    parentRotation.copy(bone.parent.getWorldQuaternion(rotation)).invert();
+    from.subVectors(childWorld,start).applyQuaternion(parentRotation).normalize();
+    to.subVectors(target,start).applyQuaternion(parentRotation).normalize();
+    bone.quaternion.premultiply(rotation.setFromUnitVectors(from,to));
+    bone.updateWorldMatrix(false,true);
+  }
+  function poseArm(arm,target,side){
+    if(!arm)return;
+    const {upper,lower,wrist,grip}=arm;
+    upper.getWorldPosition(shoulder);lower.getWorldPosition(elbow);wrist.localToWorld(hand.copy(grip));
+    const a=shoulder.distanceTo(elbow),b=elbow.distanceTo(hand);
+    reach.subVectors(target,shoulder);const length=reach.length();if(length<.001||a*b<.00001)return;
+    reach.divideScalar(length);const d=clamp(length,Math.abs(a-b)+.0001,a+b-.0001);
+    // Elbows fold down and out. Work in world metres so differently scaled avatars share a grip.
+    holder.localToWorld(pole.set(side*height*.43,height*.46,0));
+    pole.sub(shoulder);pole.addScaledVector(reach,-pole.dot(reach)).normalize();
+    const along=(a*a+d*d-b*b)/(2*d);
+    joint.copy(shoulder).addScaledVector(reach,along).addScaledVector(pole,Math.sqrt(Math.max(0,a*a-along*along)));
+    pointBone(upper,elbow,joint);
+    wrist.localToWorld(hand.copy(grip));pointBone(lower,hand,target);
+  }
+  function step(dt,rod,bearing,pitch,reel){
+    holder.rotation.y=Math.PI+bearing;
+    // Rod origin is the casting palm. Both hands follow the same moving handle.
+    holder.localToWorld(goal.set(.075*height,height*(.63+.055*Math.cos(pitch)),(-.18-.035*Math.sin(pitch))*height));
+    rod.parent.worldToLocal(rod.position.copy(goal));
+    rod.rotation.set(pitch,bearing,0,'YXZ');rod.updateWorldMatrix(true,false);
+    if(!actor)return;
+    for(const arm of arms)if(arm){arm.upper.quaternion.copy(arm.restUpper);arm.lower.quaternion.copy(arm.restLower);}
+    actor.mixer.update(dt);holder.updateWorldMatrix(true,true);
+    poseArm(arms[0],goal,1);
+    rod.localToWorld(palm.set(.105,.13+.035*Math.sin(reel),-.065+.035*Math.cos(reel)));
+    poseArm(arms[1],palm,-1);
+  }
+  return {mount,step,leave(){version++;}};
 })();
 
 // ===== 89_flight.js =====
@@ -9041,11 +9139,11 @@ const PulseRange = (() => {
   let active = false, held = false, triggerPointer = null, pressed = false, built = false;
   let ammo = capacity, hits = 0, wave = 1, cooldown = 0, reload = 0, hitTime = 0, waveTime = 0;
   let clock = 0, recoil = 0, flash = null, muzzle = null;
-  let paused=false, hadLock=false, lockRequest=null;
+  let paused=false;
 
   const ui = document.createElement('div'); ui.id = 'pulse-range-ui'; ui.hidden = true;
   ui.innerHTML = `<div id="pulse-reticle" aria-hidden="true"><i></i></div>
-    <div id="pulse-gate" hidden><strong aria-live="polite"></strong><button type="button">클릭하여 조준</button></div>
+    <div id="pulse-gate" hidden><strong>일시정지</strong><button type="button">계속하기</button></div>
     <div id="pulse-counter" aria-label="사격 기록"><b></b><span></span></div>
     <div id="pulse-touch"><button type="button" id="pulse-fire">발사</button><button type="button" id="pulse-reload">재장전</button></div>`;
   const style = document.createElement('style');
@@ -9059,6 +9157,7 @@ const PulseRange = (() => {
     #pulse-gate{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;text-align:center;color:white;background:#182823ec;padding:14px 18px;border-radius:8px;pointer-events:auto}
     #pulse-gate strong:not(:empty){display:block;margin-bottom:8px}#pulse-gate button{font:inherit;border:1px solid #a1ede1;border-radius:5px;padding:8px 16px;color:#172c26;background:#b4e9d8;cursor:pointer}
     #pulse-range-ui[data-paused="yes"] #pulse-touch,body.fps-paused #walk-action-buttons{display:none}
+    #c.fps-aiming{cursor:none}
     #pulse-counter{position:fixed;right:max(15px,env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));z-index:5;text-align:right;color:#f8f7f0;background:#18221de8;border-left:3px solid #a1ede1;padding:5px 10px;border-radius:3px}
     #pulse-counter b{font:700 16px/1.2 ui-monospace,monospace}#pulse-counter span{display:block;font-size:10px;color:#cae3d9}
     #pulse-touch{display:none;position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(178px + env(safe-area-inset-bottom));align-items:center;gap:7px;z-index:6}
@@ -9071,7 +9170,7 @@ const PulseRange = (() => {
   document.head.append(style); document.body.append(ui);
   const reticle = ui.querySelector('#pulse-reticle'), count = ui.querySelector('#pulse-counter b');
   const score = ui.querySelector('#pulse-counter span'), fireButton = ui.querySelector('#pulse-fire');
-  const gate=ui.querySelector('#pulse-gate'),resume=gate.querySelector('button'),notice=gate.querySelector('strong');
+  const gate=ui.querySelector('#pulse-gate'),resume=gate.querySelector('button');
   const metal = (color,metalness=.32) => new THREE.MeshStandardMaterial({color,metalness,roughness:.46});
   const glow = (color,intensity=1) => new THREE.MeshBasicMaterial({color:new THREE.Color(color).multiplyScalar(intensity),toneMapped:false});
   function mesh(geo,material,parent,x=0,y=0,z=0) {
@@ -9203,41 +9302,29 @@ const PulseRange = (() => {
     triggerPointer=e.pointerId;held=pressed=true;
   }
   const canvas=document.getElementById('c');
-  const locked=()=>document.pointerLockElement===canvas;
-  function syncGate(message=''){
-    gate.hidden=!active||(!paused&&(locked()||ui.dataset.touch==='yes')&&!message);
-    reticle.hidden=!gate.hidden;ui.dataset.paused=paused?'yes':'no';
+  function syncGate(){
+    gate.hidden=!active||!paused;
+    reticle.hidden=paused;ui.dataset.paused=paused?'yes':'no';
+    canvas.classList.toggle('fps-aiming',active&&!paused);
     document.body.classList.toggle('fps-paused',active&&paused);
-    notice.textContent=message||(paused?'일시정지':'');
-    resume.textContent=paused?'계속하기':'클릭하여 조준';
   }
   function pause(){
     if(!active)return;
-    paused=true;lockRequest=null;resetTrigger();Modes.keys.clear();ActorWalk.clearInput();
+    paused=true;resetTrigger();Modes.keys.clear();ActorWalk.clearInput();
     WalkActions.release();WalkStick.setActive(false);Sound.setPaused(true);syncGate();
-    if(locked())document.exitPointerLock();
   }
   function play(){
     paused=false;Modes.keys.clear();WalkStick.setActive(true);Sound.setPaused(false);
     resume.blur();syncGate();
   }
-  function capture(){
-    if(!active||locked()||lockRequest)return;
-    const request={};lockRequest=request;
-    const failed=()=>{if(lockRequest===request){lockRequest=null;pause();syncGate('마우스를 고정할 수 없습니다. 게임 화면에서 다시 시도하세요.');}};
-    try{if(!canvas.requestPointerLock){failed();return;}canvas.requestPointerLock()?.catch(failed);}
-    catch{failed();}
-  }
-  resume.addEventListener('click',e=>{
-    if(e.pointerType==='touch'||(ui.dataset.touch==='yes'&&!matchMedia('(any-pointer: fine)').matches&&e.detail===0))play();
-    else capture();
+  resume.addEventListener('click',play);
+  canvas.addEventListener('pointerdown',e=>{
+    if(active&&!paused&&e.pointerType==='mouse'&&e.button===0)held=pressed=true;
   });
-  canvas.addEventListener('click',e=>{if(active&&!locked()&&e.button===0&&e.pointerType!=='touch'&&!(e.sourceCapabilities?.firesTouchEvents))capture();});
   canvas.addEventListener('mousedown',e=>{
-    if(!active||paused||!locked())return;
-    if(e.button===2){e.preventDefault();reloadCell();}
-    else if(e.button===0){held=pressed=true;}
+    if(active&&!paused&&e.button===2){e.preventDefault();reloadCell();}
   });
+  canvas.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse'&&triggerPointer===null)resetTrigger();});
   addEventListener('mouseup',e=>{if(e.button===0&&triggerPointer===null)held=false;});
   canvas.addEventListener('contextmenu',e=>{if(active)e.preventDefault();});
   fireButton.addEventListener('pointerdown',e=>{
@@ -9245,7 +9332,9 @@ const PulseRange = (() => {
     if(triggerPointer===e.pointerId)fireButton.setPointerCapture(e.pointerId);
   });
   fireButton.addEventListener('click',e=>{if(active&&!paused&&e.detail===0)pressed=true;});
-  ui.querySelector('#pulse-reload').addEventListener('click',reloadCell);
+  ui.querySelector('#pulse-reload').addEventListener('click',e=>{
+    reloadCell();if(e.detail)e.currentTarget.blur();
+  });
   for(const ev of ['pointerup','pointercancel','lostpointercapture'])addEventListener(ev,e=>{
     if(e.pointerId===triggerPointer){held=false;triggerPointer=null;if(ev==='pointercancel')pressed=false;}
   });
@@ -9260,20 +9349,11 @@ const PulseRange = (() => {
       /^(Key[WASDCRFGX]|Arrow\w+|Shift(Left|Right)|Space)$/.test(e.code))e.stopImmediatePropagation();
   },true);
   addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
-  document.addEventListener('pointerlockerror',()=>{
-    if(active&&lockRequest){pause();syncGate('마우스 고정을 허용한 뒤 다시 눌러 주세요.');}
-  });
-  document.addEventListener('pointerlockchange',()=>{
-    if(locked()){
-      if(!active||!lockRequest){document.exitPointerLock();return;}
-      lockRequest=null;hadLock=true;play();
-    }else if(hadLock){hadLock=false;pause();}
-  });
   function enter() {
     build();placeStandColliders();active=group.visible=true;ui.hidden=false;
     ui.dataset.touch=(matchMedia('(any-pointer: coarse)').matches||navigator.maxTouchPoints)?'yes':'no';
     ActorWalk.beginFirstPerson(spawn.x,spawn.z,spawn.yaw);
-    paused=hadLock=false;lockRequest=null;syncGate();
+    paused=false;syncGate();
     held=pressed=false;triggerPointer=null;wave=1;hits=0;ammo=capacity;
     clock=cooldown=reload=hitTime=recoil=waveTime=0;
     for(const t of targets){t.live=t.face.visible=true;}
@@ -9282,7 +9362,7 @@ const PulseRange = (() => {
   }
   function leave() {
     active=group.visible=false;ui.hidden=true;resetTrigger();
-    paused=hadLock=false;lockRequest=null;Sound.setPaused(false);syncGate();
+    paused=false;Sound.setPaused(false);syncGate();
     for(const remove of standColliders)remove();
     standColliders.length=0;
     ActorWalk.endApproach();
@@ -9315,7 +9395,7 @@ const PulseRange = (() => {
     reticle.classList.toggle('ready',aim.index>=0);reticle.classList.toggle('hit',hitTime>0);
     const text=reload?'재장전 중':ammo+' / '+capacity, report='명중 '+hits+' · 라운드 '+wave;
     if(count.textContent!==text)count.textContent=text;if(score.textContent!==report)score.textContent=report;
-    return ui.dataset.touch==='yes'?'스틱 이동 · 드래그 조준 · 발사':'WASD 이동 · 좌클릭 발사 · 우클릭 재장전 · Space 점프 · Shift 달리기 · C 앉기 · Esc 일시정지';
+    return ui.dataset.touch==='yes'?'스틱 이동 · 드래그 조준 · 발사':'마우스 이동 조준 · 가장자리 회전 · 좌클릭 발사 · 우클릭 재장전 · WASD 이동 · Space 점프 · Esc 일시정지';
   }
   Modes.add('fps',{name:'1인칭 사격',enter,leave,step},'Digit3','3');
   return {get paused(){return paused;},get ammo(){return ammo;},get hits(){return hits;},get wave(){return wave;},get reloading(){return reload>0;}};
@@ -9926,13 +10006,13 @@ const Scenario=(()=>{
   function draft(text,current,edit){
     const mode=[['fishing',/낚|떡밥|fishing/i],['sub',/잠수|산호|잠망|해저|거북|submarine/i],['boat',/항해|부표|보트|항구|boat/i],['drive',/운전|차량|레이싱|경주|드리프트|race/i],
       ['fps',/사격|표적|조준|fps/i],['flight',/경비행|비행기|이륙|활주로|plane/i],['bee',/꿀벌|꽃가루|벌이|꿀모/i],['collect',/수집|통을|아이템/i],['actors',/캐릭터|등반|벽타|산행|탐험|달리/i]].find(([,r])=>r.test(text))?.[0]||(edit&&modes.includes(current.mode)?current.mode:'actors');
-    const style=[['gaussian',/가우시안/],['diorama',/디오라마/],['yeoul-3d',/흑연/],['cradle-3d',/클릭픽셀/],['cradle-25d',/2\.5D/i],['cradle-2d',/2D|클린.?도트/i],['pixel',/픽셀/]].find(([,r])=>r.test(text))?.[0]||(edit?current.style:'native');
+    const style=[['gaussian',/가우시안/],['diorama',/디오라마/],['yeoul-3d',/흑연/],['cradle-3d',/클린\s*픽셀/],['yeoul-2d',/단색\s*도트/],['yeoul-25d',/디더링/],['cradle-25d',/2\.5D|HD-2D/i],['cradle-2d',/2D|클린.?도트/i],['pixel',/픽셀/]].find(([,r])=>r.test(text))?.[0]||(edit?current.style:'native');
     const target=Number(text.match(/(\d+)\s*(?:마리|개|회|미터|m\b)/i)?.[1])||(object[mode]?3:100);
     return validate({title:text.split(/[\r\n]/)[0].slice(0,42),mode,style,weather:/눈|설원/.test(text)?'snow':/비가|폭우|빗|비 오는/.test(text)?'rain':edit&&weather.includes(Weather.S.mode)?Weather.S.mode:'clear',hour:/밤|야간/.test(text)?22:/노을|해질/.test(text)?18:/새벽/.test(text)?6:edit?G.day:14,target});
   }
   async function generate(text,provider,model,edit){
     const current=Studio.manifest(),baseline=draft(text,current,edit);if(provider==='template')return baseline;
-    const system='Design a playable Bee Garden scenario. Return only JSON matching the schema. Use a short title in the language of the user. Target is catch count in fishing, hits in fps, buoys in boat, gates in drive (max 4), barrels in collect (max 10), meters otherwise. Preserve unspecified settings when revising. Schema: '+JSON.stringify(schema);
+    const system='Design a playable Bee Garden scenario. Return only JSON matching the schema. Use a short title in the language of the user. Target is catch count in fishing, hits in fps, buoys in boat, gates in drive (max 4), barrels in collect (max 10), meters otherwise. Preserve unspecified settings when revising. Style names: '+JSON.stringify(VisualStyle.names)+'. Schema: '+JSON.stringify(schema);
     const message=JSON.stringify({request:text,operation:edit?'revise':'new',current:{mode:current.mode,style:current.style,weather:Weather.S.mode,hour:G.day,scenario:current.scenario}});
     if(provider==='browser'){
       const lm=globalThis.LanguageModel;if(!lm||await lm.availability()==='unavailable')throw Error('이 브라우저에서 기기 내 AI를 사용할 수 없습니다. 로컬 Ollama 또는 즉시 규칙 초안을 선택하세요.');
@@ -9956,10 +10036,6 @@ const Studio=(()=>{
   const open=document.createElement('button');open.id='studio-open';open.type='button';open.textContent='제작';open.setAttribute('aria-expanded','false');
   const panel=document.createElement('section');panel.id='engine-studio';panel.hidden=true;panel.setAttribute('aria-label','게임 제작');
   panel.innerHTML=`<header><h2>게임 제작</h2><button data-close aria-label="제작 닫기">×</button></header>
-    <label>화면 스타일<select data-style></select></label>
-    <label data-variant-label hidden>표현<select data-variant></select></label>
-    <label data-raster-label hidden>픽셀 해상도<select data-raster></select></label>
-    <label>픽셀 Fit<select data-pixel-fit><option value="auto">스타일 기본값</option><option value="fit">화면 맞춤 · 픽셀 스냅</option><option value="integer">정수배 · 픽셀 스냅</option><option value="off">끄기</option></select></label>
     <fieldset><legend>GLB 추가</legend><div class="studio-row"><select data-role aria-label="모델 용도"><option value="prop">월드 오브젝트</option><option value="character">플레이 캐릭터</option></select>
     <label>높이(m)<input data-height type="number" min=".05" max="100" step=".05" value="1.7"></label></div>
     <label class="studio-file">파일 선택<input type="file" data-file accept=".glb,model/gltf-binary"></label>
@@ -9982,31 +10058,8 @@ const Studio=(()=>{
   `;document.head.append(css);document.body.append(open,panel);
   const get=name=>panel.querySelector('[data-'+name+']');
   const status=panel.querySelector('output'), file=get('file'), library=get('model'), idea=get('idea');
-  const styles=[['pixel','픽셀'],['2d','2D'],['25d','2.5D'],['native','3D'],['cradle-3d','클릭픽셀 3D'],
-    ['yeoul-3d','흑연명암 3D'],['diorama','디오라마'],['gaussian','가우시안']];
-  for(const [id,name] of styles)get('style').add(new Option(name,id));
-  for(const [id,name] of [['cradle','AI요람'],['yeoul','여울']])get('variant').add(new Option(name,id));
-  const groupFor=id=>id.endsWith('-2d')?'2d':id.endsWith('-25d')?'25d':id;
-  for(const [w,h] of VisualStyle.sizes)get('raster').add(new Option(w+' × '+h,w));
-  function fields(){
-    const id=VisualStyle.current,group=groupFor(id),variant=group!==id;
-    get('style').value=group;get('variant-label').hidden=!variant;
-    if(variant){
-      get('variant').options[0].text=group==='2d'?'AI요람 · 클린 도트':'AI요람 · HD-2D 라이트';
-      get('variant').options[1].text=group==='2d'?'여울 · 단색 도트':'여울 · 디더링';
-      get('variant').value=id.split('-')[0];
-    }
-    get('raster').value=VisualStyle.raster;get('pixel-fit').value=PixelFit.choice;
-    get('raster-label').hidden=!(VisualStyle.usesRaster()||PixelFit.enabled);
-  }
-  function saveLook(){
-    const group=get('style').value,id=['2d','25d'].includes(group)?get('variant').value+'-'+group:group;
-    VisualStyle.select(id,get('raster').value);PixelFit.select(get('pixel-fit').value);fields();
-    if(!projectMode)try{localStorage.setItem('garden.studio.look',JSON.stringify([VisualStyle.current,VisualStyle.raster,PixelFit.choice]));}catch{}
-  }
-  get('variant').onchange=get('style').onchange=get('raster').onchange=get('pixel-fit').onchange=saveLook;
   function show(on){panel.hidden=!on;open.hidden=on;open.setAttribute('aria-expanded',String(on));Modes.keys.clear();
-    if(on&&document.pointerLockElement)document.exitPointerLock();if(on)fields();
+    if(on&&document.pointerLockElement)document.exitPointerLock();
   }
   open.onclick=()=>show(true);get('close').onclick=()=>show(false);
   panel.addEventListener('keydown',e=>{if(e.key==='Escape')show(false);e.stopPropagation();});
@@ -10138,10 +10191,62 @@ const Studio=(()=>{
         for(const {blob,...row} of await storage('getAll')){const url=URL.createObjectURL(blob);urls.set(row.id,url);await load(row,url);}
       }
     }catch(e){status.textContent=e.message;if(config)show(true);}
-    fields();libraryState();
+    libraryState();VisualControls.refresh();
   }
   G.tick.push((t,dt)=>{for(const mixer of mixers.values())mixer.update(dt);});
   return {restore,manifest,prompt};
+})();
+
+// ===== 89_visual_controls.js =====
+
+const VisualControls=(()=>{
+  const panel=document.createElement('dialog');
+  panel.id='game-visual';panel.setAttribute('aria-labelledby','visual-title');
+  panel.innerHTML=`<header><h2 id="visual-title">게임 비주얼</h2><button type="button" aria-label="게임 비주얼 닫기">닫기 ×</button></header>
+    <fieldset><legend>화면 스타일</legend><div class="visual-grid"></div></fieldset>
+    <label hidden>표현 방식<select data-variant></select></label>
+    <label>픽셀 해상도<select data-raster></select></label>
+    <label>픽셀 Fit<select data-pixel-fit><option value="auto">스타일 기본값</option><option value="off">끄기</option><option value="fit">화면 맞춤</option><option value="integer">정수배</option></select></label>`;
+  const css=document.createElement('style');css.textContent=`
+    #game-visual{box-sizing:border-box;inset:max(54px,env(safe-area-inset-top)) 10px auto auto;margin:0;width:min(310px,calc(100vw - 20px));max-height:calc(100dvh - 68px);overflow:auto;color:#ecf3e8;background:#19332e;border:1px solid #789487;border-radius:10px;padding:14px;font:600 14px/1.35 system-ui}
+    #game-visual::backdrop{background:#06191320}#game-visual header,#game-visual>label{display:flex;align-items:center;justify-content:space-between;gap:8px}#game-visual h2{font-size:18px;margin:0}#game-visual fieldset{border:0;padding:0;margin:15px 0 10px}#game-visual legend{font-size:12px;color:#bed0c1;margin-bottom:6px}
+    #game-visual .visual-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}#game-visual label:has(input){position:relative;cursor:pointer}#game-visual input{position:absolute;opacity:0}
+    #game-visual span,#game-visual button,#game-visual select{display:block;background:#29483d;color:inherit;border:1px solid #759483;border-radius:5px;padding:7px 8px;font:inherit;cursor:pointer}
+    #game-visual input:checked+span{background:#d2e8cb;color:#143226;border-color:#e7f9de}#game-visual input:focus-visible+span,#game-visual :is(button,select):focus-visible{outline:2px solid #ffca7c;outline-offset:1px}
+    #game-visual>label{margin-top:7px}#game-visual [hidden]{display:none!important}`;
+  document.head.append(css);document.body.append(panel);
+  const grid=panel.querySelector('.visual-grid'),variant=panel.querySelector('[data-variant]'),raster=panel.querySelector('[data-raster]'),fit=panel.querySelector('[data-pixel-fit]');
+  for(const [id,name] of Object.entries(VisualStyle.groups)){
+    const label=document.createElement('label'),radio=document.createElement('input'),text=document.createElement('span');
+    radio.type='radio';radio.name='world-visual-style';radio.value=id;text.textContent=name;label.append(radio,text);grid.append(label);
+  }
+  for(const [w,h] of VisualStyle.sizes)raster.add(new Option(w+' × '+h,w));
+  let family='cradle',afterClose=null;
+  function sync(){
+    const id=VisualStyle.current,group=Object.keys(VisualStyle.variants).find(k=>Object.hasOwn(VisualStyle.variants[k],id))||id;
+    const options=VisualStyle.variants[group];
+    grid.querySelector('input[value="'+group+'"]').checked=true;
+    if(options){
+      family=id.split('-')[0];variant.replaceChildren();
+      for(const [key,name] of Object.entries(options))variant.add(new Option(name,key));
+      variant.value=id;
+    }
+    variant.parentElement.hidden=!options;raster.value=VisualStyle.raster;fit.value=PixelFit.choice;
+    raster.parentElement.hidden=!VisualStyle.usesRaster()&&!PixelFit.enabled;
+  }
+  panel.onchange=e=>{
+    const el=e.target;
+    if(el.type==='radio')VisualStyle.select(VisualStyle.variants[el.value]?family+'-'+el.value:el.value);
+    else if(el===variant)VisualStyle.select(el.value);
+    else if(el===raster)VisualStyle.select(VisualStyle.current,el.value);
+    else if(el===fit)PixelFit.select(el.value);
+    sync();
+    if(!Q.get('project'))try{localStorage.setItem('garden.studio.look',JSON.stringify([VisualStyle.current,VisualStyle.raster,PixelFit.choice]));}catch{}
+  };
+  for(const name of ['keydown','keyup'])panel.addEventListener(name,e=>e.stopPropagation());
+  panel.querySelector('button').onclick=()=>panel.close();
+  panel.addEventListener('close',()=>{Modes.keys.clear();afterClose?.();afterClose=null;});
+  return {refresh(){if(panel.open)sync();},open(onClose){afterClose=onClose;Modes.keys.clear();sync();if(!panel.open)panel.showModal();grid.querySelector(':checked').focus();}};
 })();
 
 // ===== 89_vr_actors.js =====
@@ -10305,11 +10410,25 @@ const ActorWalk = (() => {
     orbitPointer = e.pointerId; pointerX = e.clientX; pointerY = e.clientY;
     if (!firstPerson || e.pointerType !== 'mouse') e.target.setPointerCapture(e.pointerId);
   });
-  // Locked mice send relative mouse movement even at the physical screen edge.
-  document.addEventListener('mousemove',e=>{
-    if(!active||!firstPerson||PulseRange.paused||document.pointerLockElement!==G.R.domElement)return;
-    azimuth-=e.movementX*.0026;pitch=clamp(pitch-e.movementY*.0026,-1.34,1.34);
+  const canvas=document.getElementById('c');
+  let mouseX=null,mouseY=0,edgeYaw=0,edgePitch=0;
+  function resetMouse(){mouseX=null;edgeYaw=edgePitch=0;}
+  // Screen coordinates also work in embedded browsers where pointer lock is unavailable.
+  function edgeSpeed(fraction){
+    const axis=2*fraction-1;
+    return Math.sign(axis)*sm(.82,1,Math.abs(axis));
+  }
+  canvas.addEventListener('pointermove',e=>{
+    if(e.pointerType!=='mouse'||!active||!firstPerson||PulseRange.paused)return;
+    if(mouseX!==null){
+      azimuth-=(e.clientX-mouseX)*.0026;pitch=clamp(pitch-(e.clientY-mouseY)*.0026,-1.34,1.34);
+    }
+    mouseX=e.clientX;mouseY=e.clientY;
+    const rect=canvas.getBoundingClientRect();
+    edgeYaw=edgeSpeed((mouseX-rect.left)/rect.width);edgePitch=edgeSpeed((mouseY-rect.top)/rect.height);
   });
+  canvas.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')resetMouse();});
+  document.addEventListener('focusin',resetMouse);
   addEventListener('pointermove', e => {
     if (e.pointerId !== orbitPointer) return;
     azimuth -= (e.clientX - pointerX) * .006;
@@ -10319,7 +10438,7 @@ const ActorWalk = (() => {
   });
   for (const event of ['pointerup','pointercancel','lostpointercapture'])
     addEventListener(event, e => { if (e.pointerId === orbitPointer) stopOrbit(); });
-  function clearInput() { stopOrbit(); jumpPressed = false; }
+  function clearInput() { stopOrbit();resetMouse();jumpPressed = false; }
   addEventListener('blur', clearInput);
   document.addEventListener('visibilitychange', () => { if (document.hidden) clearInput(); });
   addEventListener('keydown', e => {
@@ -10587,17 +10706,19 @@ const ActorWalk = (() => {
   function endApproach() {
     if (!savedWalk) return;
     leave();
-    if (firstPerson && document.pointerLockElement === G.R.domElement) document.exitPointerLock();
     feet.copy(savedWalk.feet); facing=savedWalk.facing; azimuth=savedWalk.azimuth; pitch=savedWalk.pitch;
     placed=savedWalk.placed; savedWalk=null; firstPerson=false; extraFloor=null;
   }
   function stepFirstPerson(camera,dt) {
+    azimuth-=edgeYaw*2.45*dt;pitch=clamp(pitch-edgePitch*1.6*dt,-1.34,1.34);
     if (player) walk(dt);
     const height=player?.entry?.height || 1.71;
     camera.position.copy(feet); camera.position.y+=height*(.91-.26*lowCamera);
     camera.rotation.set(pitch,azimuth,0,'YXZ'); camera.near=.04; camera.fov=68+4*fastCamera;
   }
   return {enter,leave,step,selectHuman,beginApproach,endApproach,stepApproach:step,stepFirstPerson,clearInput,
+    get anglerEntry(){return selectedHuman?.species==='frog'?null:selectedHuman;},
+    loadActor,releaseActor:release,
     beginFirstPerson(x,z,yaw) { beginApproach(x,z,yaw,null,true); }, get position() {return feet;},
     get avatar(){return player?.holder || null;}, get thirdPerson(){return active&&!firstPerson;},get climbing(){return climbing;},
     get currentId() {
@@ -10648,7 +10769,9 @@ const ActorWalk = (() => {
     Modes.step(camera, dt); VisualStyle.frame(camera); camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
     for (const f of G.tick) f(t, dt);
     Minimap.draw(t);
-    Post.render(scene, VisualStyle.renderCamera(camera), dt);
+    const view=VisualStyle.renderCamera(camera);
+    Modes.shadows(view);
+    Post.render(scene, view, dt);
     if (Modes.cur === 'drive') DriveRace.renderMirror(R,scene,dt); }
   window.__frameAt = (t, dt = 1 / 60) => frame(t, dt);
   frame(0, 1 / 60); Studio.restore(); loader.style.opacity = 0; setTimeout(() => loader.remove(), 700);
@@ -10675,14 +10798,14 @@ const Guide = (() => {
       { t: '모드 바꾸기', d: '1 자유 비행 · 2 벌 · 3 FPS · 4 레이싱 · 5 경비행 · 6 배 · 7 잠수함 · 8 낚시. 화면 왼쪽 위 목록에서도 고를 수 있습니다.', code: "Modes.set('drive');", run: 1 },
       { t: '해안 항해', d: 'W/S로 전후진하고 A/D로 조타해 부표를 차례로 지납니다.', code: "Modes.set('boat');", run: 1 },
       { t: '산호초 잠항', d: 'Q 잠항, E 부상, P 잠망경입니다. 잠망경에서 드래그로 둘러보고 Z로 배율을 바꿉니다.', code: "Modes.set('sub');", run: 1 },
-      { t: '내 게임 만들기', d: '시스템 메뉴의 도구와 설정에서 화면 스타일 · GLB를 열어 화면 스타일을 고르고 GLB를 추가하세요. 만들고 싶은 내용을 적고 제작 프롬프트 복사를 누르면 저장소 링크와 설정을 함께 가져갈 수 있습니다.' },
+      { t: '내 게임 만들기', d: '상단의 게임 비주얼에서 화면 표현을 고르세요. GLB 파일은 시스템 메뉴의 도구와 설정에서 추가합니다. 만들고 싶은 내용을 적고 제작 프롬프트 복사를 누르면 저장소 링크와 설정을 함께 가져갈 수 있습니다.' },
       { t: '자유 비행으로 돌아오기', d: 'W A S D 이동, 화면을 끌어서 둘러보기, Q E 높이, Shift 빠르게.', code: "Modes.set('free');", run: 1 },
       { t: '정원에서 캐릭터 조작', d: '위쪽 목록에서 사람이나 개구리 Froggy를 고르세요. W + Shift + Space로 달리면서 점프합니다. 높은 벽을 향해 전진하며 점프하면 잡고, 앞뒤로 오르내리거나 점프로 놓을 수 있습니다. WASD로 이동하고 Shift로 달리고 Space로 점프합니다. C를 누르면 앉거나 일어섭니다. 터치 화면에서는 왼쪽 스틱과 오른쪽 동작 버튼을 사용하세요.', code: "Modes.set('actors');", run: 1 },
-      { t: '2D와 2.5D 시점', d: '제작 → 화면 스타일에서 2D나 2.5D를 선택하세요. 캐릭터 주변을 드래그해 회전하고 마우스 휠로 확대·축소할 수 있습니다. 2D의 AI요람 · 클린 도트는 이동할 때 카메라를 픽셀 격자에 맞춥니다.' },
+      { t: '2D와 2.5D 시점', d: '게임 비주얼에서 2D나 2.5D를 선택하세요. 캐릭터 주변을 드래그해 회전하고 마우스 휠로 확대·축소할 수 있습니다. 2D의 클린 도트는 이동할 때 카메라를 픽셀 격자에 맞춥니다.' },
       { t: '해안의 바위와 흙', d: '정원 끝 바위로 돌아갑니다. 가까이 다가가 표면의 갈라진 결을 보고, 위쪽 숲으로 시선을 돌리면 오후 햇빛이 드는 방향을 읽을 수 있습니다.', code: 'Modes.visitOutcrop();\nG.day = 16.15;', run: 1 },
       { t: '벌의 눈으로 보기', d: '어안 렌즈와 자동 초점이 켜집니다. B를 누르면 겹눈으로 봅니다.', code: "Modes.set('bee');", run: 1 },
       { t: '주소로 시작 상태 정하기', d: '코드를 고치지 않고 장면을 고정합니다. 주소 뒤에 붙입니다.', code: '?mode=drive&day=17.5&still     해질녘에 멈춘 시간, 운전\n?weather=snow&day=9            아침, 눈\n?look=plain                    기본 조명만\n?low                           가벼운 설정' },
-      { t: '8 바다낚시', d: '낚싯대와 떡밥을 고른 뒤 A/D로 찌 방향을 정합니다. Space로 던지고 입질에 맞춰 다시 누르세요. 감는 동안 장력계를 보고 손을 떼면 줄이 풀립니다. 어망에서 어종과 무게를 확인하세요.', code: "Modes.set('fishing');", run: 1 },
+      { t: '8 바다낚시', d: '부교에 선 캐릭터가 낚싯대를 쥡니다. 낚싯대와 떡밥을 고른 뒤 A/D로 찌 방향을 정합니다. Space로 던지고 입질에 맞춰 다시 누르세요. 감는 동안 장력계를 보고 손을 떼면 줄이 풀립니다. 어망에서 어종과 무게를 확인하세요.', code: "Modes.set('fishing');", run: 1 },
     ] },
     { t: '2. 세계 바꾸기', lead: '시각, 날씨, 빛은 모두 값 하나로 바뀌고, 세계의 나머지(땅의 색, 접지력, 안개, 소리)가 그 값을 따라갑니다.', ex: [
       { t: '눈 내리게 하기', d: '기온이 내려가고 눈이 쌓이기 시작합니다. 20초쯤 지나면 땅이 덮입니다. 키로는 N.', code: "Weather.set('snow');", run: 1 },
@@ -10714,7 +10837,7 @@ const Guide = (() => {
     ] },
     { t: '5. 게임 엔진으로 활용하는 방법', lead: '지형, 날씨, 물리, 차량과 카메라를 조합해 장르를 구성합니다. V 모드에서 외부 GLB 캐릭터를 직접 조작하고, 샘플 메뉴에서 모델의 크기와 재질을 살펴볼 수 있습니다.', ex: [
       { t: '해안 레이싱', d: '운전석으로 다가가 E로 탑승합니다. 자동 변속으로 3개 체크포인트와 결승선을 통과합니다. O 운전석 문, W 가속, A/D 조향, Space 제동, 제동 중 조향으로 드리프트, R 코스 복귀입니다.', code: "Modes.set('drive');", run: 1 },
-      { t: 'FPS 사격장', d: '화면을 클릭해 마우스를 고정하고 중앙 조준점으로 표적을 겨누세요. 왼쪽 클릭은 발사, 오른쪽 클릭이나 R은 재장전입니다. WASD로 이동하고 Space로 점프하며 C로 앉습니다. Esc로 일시정지하면 커서가 나타납니다. 계속하기를 클릭하면 다시 조준합니다.', code: "Modes.set('fps');", run: 1 },
+      { t: 'FPS 사격장', d: '마우스를 움직여 중앙 조준점으로 표적을 겨누세요. 화면 가장자리에 두면 계속 선회합니다. 왼쪽 클릭은 발사, 오른쪽 클릭이나 R은 재장전입니다. WASD로 이동하고 Space로 점프하며 C로 앉습니다. Esc로 일시정지하면 커서가 나타납니다. 계속하기를 클릭하면 다시 조준합니다.', code: "Modes.set('fps');", run: 1 },
       { t: '경비행', d: '활주로의 조종석으로 다가가 E로 탑승합니다. W/S 출력, 마우스 위·아래 또는 ↑/↓로 기수 조종, A/D 선회, 지상 Space 제동입니다. E로 하차하고 공중에서는 낙하산이 펼쳐집니다.', code: "Modes.set('flight');", run: 1 },
       { t: '3인칭 RPG', d: 'V 모드의 캐릭터 이동, 추적 카메라, 대기·걷기 전환을 활용할 수 있습니다. 여기에 상호작용, 대화와 인벤토리를 연결해 보세요.', code: '' },
       { t: '대화로 만들기', d: '이 엔진은 원하는 것을 말하면 Claude가 해당 파일을 고치는 방식으로 자랐습니다. 구체적으로, 보이는 대로 말할수록 결과가 좋습니다.', code: '"차가 너무 미끄러워"                → 02_config.js의 접지력 조정\n"밤에 전조등이 켜지게 해 줘"         → 87_drive.js에 조명 추가\n"해안 도로에 헤어핀을 두 개 넣어 줘" → 42_island.js의 도로 수정\n"가지 끝이 보라색으로 보여"          → 원인을 찾아 렌즈 값 수정' },
@@ -10753,10 +10876,10 @@ const Workbench=(()=>{
     fps:'가상 블래스터로 발광 표적을 맞힙니다.',drive:'운전석에 올라 해안 코스를 달립니다.',flight:'활주로에서 경비행기를 타고 이륙합니다.',
     boat:'배를 조종해 부표를 통과합니다.',sub:'잠수하고 잠망경으로 수면을 관찰합니다.',fishing:'미끼를 골라 입질을 기다리고 낚아 올립니다.',collect:'시간 안에 흩어진 통을 수집합니다.'};
   const bar=document.createElement('nav'),menu=document.createElement('dialog');bar.id='world-bar';menu.id='system-menu';
-  bar.setAttribute('aria-label','시뮬레이션');bar.innerHTML='<span>플레이 모드</span><button type="button" data-system aria-haspopup="dialog">시스템 메뉴</button>';
+  bar.setAttribute('aria-label','시뮬레이션');bar.innerHTML='<span>플레이 모드</span><button type="button" data-visual aria-haspopup="dialog">게임 비주얼</button><button type="button" data-system aria-haspopup="dialog">시스템 메뉴</button>';
   menu.setAttribute('aria-labelledby','system-title');
   menu.innerHTML=`<header><h1 id="system-title">Bee Garden</h1><button data-close aria-label="시스템 메뉴 닫기">닫기 ×</button></header>
-    <nav aria-label="시스템 기능"><button data-tab="play">플레이</button><button data-tab="make">AI 게임 제작</button><button data-tab="tools">도구와 설정</button></nav>
+    <nav aria-label="시스템 기능"><button data-tab="play">플레이</button><button data-tab="make">AI 게임 제작</button><button data-tab="tools">도구와 설정</button><button data-visual aria-haspopup="dialog">게임 비주얼</button></nav>
     <section data-page="play"><form class="quick-idea"><label for="quick-game-idea">만들고 싶은 게임</label><div><input id="quick-game-idea" maxlength="1800" placeholder="예: 밤바다에서 물고기 세 마리 낚기"><button class="primary">AI로 만들기</button></div></form><h2>시뮬레이션 선택</h2><div class="mode-grid"></div></section>
     <section data-page="make" hidden><h2>만들고 싶은 게임</h2><form><textarea required maxlength="1800" rows="3" aria-label="만들고 싶은 게임" placeholder="예: 비 오는 해안에서 감성돔 세 마리를 잡는 픽셀 낚시 게임"></textarea>
     <div class="ai-settings"><label>작업<select name="operation"><option value="new">새 게임 만들기</option><option value="edit">현재 게임 개편</option></select></label>
@@ -10783,8 +10906,10 @@ const Workbench=(()=>{
     #sample-button,#studio-open,#engine-sound{display:none!important}#lighting-panel{top:60px!important;z-index:8!important}
     @media(max-width:620px){#world-bar>span{display:none}#system-menu header,#system-menu>nav,#system-menu>section{padding:12px}#system-menu .mode-grid button,#system-menu .tool-grid button{padding:8px}#mode-hint{font-size:10px!important;padding:4px 7px!important}#scenario-goal{top:auto;bottom:9px;width:max-content;max-width:80vw}}
   `;document.head.append(css);document.body.append(bar,menu);
-  const $=s=>menu.querySelector(s),picker=document.querySelector('#mode-picker'),launch=bar.querySelector('button');
-  bar.insertBefore(picker,launch);let current='play',proposal=null,revision=0;
+  const $=s=>menu.querySelector(s),picker=document.querySelector('#mode-picker'),launch=bar.querySelector('[data-system]'),visual=bar.querySelector('[data-visual]');
+  bar.insertBefore(picker,visual);let current='play',proposal=null,revision=0;
+  visual.onclick=()=>VisualControls.open(()=>visual.blur());
+  $('[data-visual]').onclick=()=>{close();VisualControls.open(()=>{open();$('[data-visual]').focus();});};
   function tab(id){
     current=id;for(const s of menu.querySelectorAll('[data-page]'))s.hidden=s.dataset.page!==id;
     for(const b of menu.querySelectorAll('[data-tab]'))b.setAttribute('aria-pressed',String(b.dataset.tab===id));
@@ -10808,7 +10933,7 @@ const Workbench=(()=>{
     const b=tile($('.mode-grid'),opt.text,descriptions[opt.value],()=>{close();Modes.set(opt.value);});b.dataset.mode=opt.value;
   }
   const click=id=>document.getElementById(id).click(),tools=$('.tool-grid');
-  tile(tools,'화면 스타일 · GLB','픽셀, 2D, 3D 표현과 모델 가져오기',()=>{close();click('studio-open');});
+  tile(tools,'GLB · 프로젝트','모델 가져오기와 프로젝트 저장',()=>{close();click('studio-open');});
   tile(tools,'캐릭터 · 모델 샘플','사람, 개구리, 건물과 탈것 둘러보기',()=>{close();click('sample-button');});
   tile(tools,'조명 설정','그림자, 반사, 주변광과 렌즈 비교',()=>{close();LookPanel.open();});
   tile(tools,'엔진 활용법','모드별 조작, 예제 코드와 제작 방법',()=>{close();Guide.toggle();});
@@ -10833,6 +10958,7 @@ const Workbench=(()=>{
     const idea=document.querySelector('[data-idea]');if(idea)idea.value=input.value;};
   function build(){
     sound.lastChild.textContent=document.getElementById('engine-sound').textContent;
+    if(Q.get('menu')==='visual'){VisualControls.open();return;}
     if(!Q.has('mode')&&!Q.has('project')&&!Q.has('capture')&&!Q.has('nopanel')&&!Q.has('guide')&&!Q.has('cam'))open('play');
     if(Q.get('menu')==='make')open('make');
   }

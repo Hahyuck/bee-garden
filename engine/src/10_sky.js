@@ -19,6 +19,7 @@ vec3 skyCol(vec3 d, float sun){
 const Sky = (() => {
   const C = CFG.sky, U = { uSkySun: { value: new THREE.Vector3(0, 1, 0) }, uSkyK: { value: new THREE.Vector3(1, 1, 1) }, uZen: { value: new THREE.Vector3() }, uHor: { value: new THREE.Vector3() }, uSkyP: { value: new THREE.Vector4(.3, 0, 0, 0) } };
   const sunDir = new THREE.Vector3(), light = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3(); let dome, sun, hemi, drift = 0, flow = !Q.has('still');
+  const moon = new THREE.Vector3(.58, .66, .46).normalize();
   if (Q.get('day')) G.day = +Q.get('day');
   const mix3 = (o, a, b, t) => o.set(lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t));
 
@@ -45,7 +46,7 @@ const Sky = (() => {
     const sunI = sm(-.03, .12, y) * (1 - .78 * storm) * (1 - .35 * cover * (1 - storm)), moonI = sm(.04, .2, -y) * .05 * (1 - .6 * storm);
     mix3(_a, [1, .4, .14], [1, .95, .86], sm(.0, .36, y)); U.uSkySun.value.copy(sunDir); U.uSkyK.value.copy(_a).multiplyScalar(sm(-.08, .1, y));
     if (sunI > moonI) { light.copy(sunDir); if (light.y < .06) { light.y = .06; light.normalize(); } sun.color.setRGB(_a.x, _a.y, _a.z); sun.intensity = C.sunIntensity * sunI; }
-    else { light.set(-sunDir.x, Math.max(-sunDir.y, .25), -sunDir.z).normalize(); sun.color.setRGB(.55, .68, 1); sun.intensity = C.sunIntensity * moonI; }
+    else { light.copy(moon); sun.color.setRGB(.55, .68, 1); sun.intensity = C.sunIntensity * moonI; }
     hemi.color.setRGB(U.uZen.value.x * .9 + U.uHor.value.x * .35, U.uZen.value.y * .9 + U.uHor.value.y * .35, U.uZen.value.z * .9 + U.uHor.value.z * .35); hemi.groundColor.setRGB(.2, .19, .11).multiplyScalar(.25 + .75 * day);
     hemi.intensity = C.fillIntensity * (.1 + .9 * day) * (1 - .3 * storm);
     // the air takes the horizon's colour, and thickens in rain and snow

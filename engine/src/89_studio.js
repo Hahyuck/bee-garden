@@ -6,10 +6,6 @@ const Studio=(()=>{
   const open=document.createElement('button');open.id='studio-open';open.type='button';open.textContent='제작';open.setAttribute('aria-expanded','false');
   const panel=document.createElement('section');panel.id='engine-studio';panel.hidden=true;panel.setAttribute('aria-label','게임 제작');
   panel.innerHTML=`<header><h2>게임 제작</h2><button data-close aria-label="제작 닫기">×</button></header>
-    <label>화면 스타일<select data-style></select></label>
-    <label data-variant-label hidden>표현<select data-variant></select></label>
-    <label data-raster-label hidden>픽셀 해상도<select data-raster></select></label>
-    <label>픽셀 Fit<select data-pixel-fit><option value="auto">스타일 기본값</option><option value="fit">화면 맞춤 · 픽셀 스냅</option><option value="integer">정수배 · 픽셀 스냅</option><option value="off">끄기</option></select></label>
     <fieldset><legend>GLB 추가</legend><div class="studio-row"><select data-role aria-label="모델 용도"><option value="prop">월드 오브젝트</option><option value="character">플레이 캐릭터</option></select>
     <label>높이(m)<input data-height type="number" min=".05" max="100" step=".05" value="1.7"></label></div>
     <label class="studio-file">파일 선택<input type="file" data-file accept=".glb,model/gltf-binary"></label>
@@ -32,31 +28,8 @@ const Studio=(()=>{
   `;document.head.append(css);document.body.append(open,panel);
   const get=name=>panel.querySelector('[data-'+name+']');
   const status=panel.querySelector('output'), file=get('file'), library=get('model'), idea=get('idea');
-  const styles=[['pixel','픽셀'],['2d','2D'],['25d','2.5D'],['native','3D'],['cradle-3d','클릭픽셀 3D'],
-    ['yeoul-3d','흑연명암 3D'],['diorama','디오라마'],['gaussian','가우시안']];
-  for(const [id,name] of styles)get('style').add(new Option(name,id));
-  for(const [id,name] of [['cradle','AI요람'],['yeoul','여울']])get('variant').add(new Option(name,id));
-  const groupFor=id=>id.endsWith('-2d')?'2d':id.endsWith('-25d')?'25d':id;
-  for(const [w,h] of VisualStyle.sizes)get('raster').add(new Option(w+' × '+h,w));
-  function fields(){
-    const id=VisualStyle.current,group=groupFor(id),variant=group!==id;
-    get('style').value=group;get('variant-label').hidden=!variant;
-    if(variant){
-      get('variant').options[0].text=group==='2d'?'AI요람 · 클린 도트':'AI요람 · HD-2D 라이트';
-      get('variant').options[1].text=group==='2d'?'여울 · 단색 도트':'여울 · 디더링';
-      get('variant').value=id.split('-')[0];
-    }
-    get('raster').value=VisualStyle.raster;get('pixel-fit').value=PixelFit.choice;
-    get('raster-label').hidden=!(VisualStyle.usesRaster()||PixelFit.enabled);
-  }
-  function saveLook(){
-    const group=get('style').value,id=['2d','25d'].includes(group)?get('variant').value+'-'+group:group;
-    VisualStyle.select(id,get('raster').value);PixelFit.select(get('pixel-fit').value);fields();
-    if(!projectMode)try{localStorage.setItem('garden.studio.look',JSON.stringify([VisualStyle.current,VisualStyle.raster,PixelFit.choice]));}catch{}
-  }
-  get('variant').onchange=get('style').onchange=get('raster').onchange=get('pixel-fit').onchange=saveLook;
   function show(on){panel.hidden=!on;open.hidden=on;open.setAttribute('aria-expanded',String(on));Modes.keys.clear();
-    if(on&&document.pointerLockElement)document.exitPointerLock();if(on)fields();
+    if(on&&document.pointerLockElement)document.exitPointerLock();
   }
   open.onclick=()=>show(true);get('close').onclick=()=>show(false);
   panel.addEventListener('keydown',e=>{if(e.key==='Escape')show(false);e.stopPropagation();});
@@ -188,7 +161,7 @@ const Studio=(()=>{
         for(const {blob,...row} of await storage('getAll')){const url=URL.createObjectURL(blob);urls.set(row.id,url);await load(row,url);}
       }
     }catch(e){status.textContent=e.message;if(config)show(true);}
-    fields();libraryState();
+    libraryState();VisualControls.refresh();
   }
   G.tick.push((t,dt)=>{for(const mixer of mixers.values())mixer.update(dt);});
   return {restore,manifest,prompt};

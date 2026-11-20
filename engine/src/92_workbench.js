@@ -5,10 +5,10 @@ const Workbench=(()=>{
     fps:'가상 블래스터로 발광 표적을 맞힙니다.',drive:'운전석에 올라 해안 코스를 달립니다.',flight:'활주로에서 경비행기를 타고 이륙합니다.',
     boat:'배를 조종해 부표를 통과합니다.',sub:'잠수하고 잠망경으로 수면을 관찰합니다.',fishing:'미끼를 골라 입질을 기다리고 낚아 올립니다.',collect:'시간 안에 흩어진 통을 수집합니다.'};
   const bar=document.createElement('nav'),menu=document.createElement('dialog');bar.id='world-bar';menu.id='system-menu';
-  bar.setAttribute('aria-label','시뮬레이션');bar.innerHTML='<span>플레이 모드</span><button type="button" data-system aria-haspopup="dialog">시스템 메뉴</button>';
+  bar.setAttribute('aria-label','시뮬레이션');bar.innerHTML='<span>플레이 모드</span><button type="button" data-visual aria-haspopup="dialog">게임 비주얼</button><button type="button" data-system aria-haspopup="dialog">시스템 메뉴</button>';
   menu.setAttribute('aria-labelledby','system-title');
   menu.innerHTML=`<header><h1 id="system-title">Bee Garden</h1><button data-close aria-label="시스템 메뉴 닫기">닫기 ×</button></header>
-    <nav aria-label="시스템 기능"><button data-tab="play">플레이</button><button data-tab="make">AI 게임 제작</button><button data-tab="tools">도구와 설정</button></nav>
+    <nav aria-label="시스템 기능"><button data-tab="play">플레이</button><button data-tab="make">AI 게임 제작</button><button data-tab="tools">도구와 설정</button><button data-visual aria-haspopup="dialog">게임 비주얼</button></nav>
     <section data-page="play"><form class="quick-idea"><label for="quick-game-idea">만들고 싶은 게임</label><div><input id="quick-game-idea" maxlength="1800" placeholder="예: 밤바다에서 물고기 세 마리 낚기"><button class="primary">AI로 만들기</button></div></form><h2>시뮬레이션 선택</h2><div class="mode-grid"></div></section>
     <section data-page="make" hidden><h2>만들고 싶은 게임</h2><form><textarea required maxlength="1800" rows="3" aria-label="만들고 싶은 게임" placeholder="예: 비 오는 해안에서 감성돔 세 마리를 잡는 픽셀 낚시 게임"></textarea>
     <div class="ai-settings"><label>작업<select name="operation"><option value="new">새 게임 만들기</option><option value="edit">현재 게임 개편</option></select></label>
@@ -35,8 +35,10 @@ const Workbench=(()=>{
     #sample-button,#studio-open,#engine-sound{display:none!important}#lighting-panel{top:60px!important;z-index:8!important}
     @media(max-width:620px){#world-bar>span{display:none}#system-menu header,#system-menu>nav,#system-menu>section{padding:12px}#system-menu .mode-grid button,#system-menu .tool-grid button{padding:8px}#mode-hint{font-size:10px!important;padding:4px 7px!important}#scenario-goal{top:auto;bottom:9px;width:max-content;max-width:80vw}}
   `;document.head.append(css);document.body.append(bar,menu);
-  const $=s=>menu.querySelector(s),picker=document.querySelector('#mode-picker'),launch=bar.querySelector('button');
-  bar.insertBefore(picker,launch);let current='play',proposal=null,revision=0;
+  const $=s=>menu.querySelector(s),picker=document.querySelector('#mode-picker'),launch=bar.querySelector('[data-system]'),visual=bar.querySelector('[data-visual]');
+  bar.insertBefore(picker,visual);let current='play',proposal=null,revision=0;
+  visual.onclick=()=>VisualControls.open(()=>visual.blur());
+  $('[data-visual]').onclick=()=>{close();VisualControls.open(()=>{open();$('[data-visual]').focus();});};
   function tab(id){
     current=id;for(const s of menu.querySelectorAll('[data-page]'))s.hidden=s.dataset.page!==id;
     for(const b of menu.querySelectorAll('[data-tab]'))b.setAttribute('aria-pressed',String(b.dataset.tab===id));
@@ -60,7 +62,7 @@ const Workbench=(()=>{
     const b=tile($('.mode-grid'),opt.text,descriptions[opt.value],()=>{close();Modes.set(opt.value);});b.dataset.mode=opt.value;
   }
   const click=id=>document.getElementById(id).click(),tools=$('.tool-grid');
-  tile(tools,'화면 스타일 · GLB','픽셀, 2D, 3D 표현과 모델 가져오기',()=>{close();click('studio-open');});
+  tile(tools,'GLB · 프로젝트','모델 가져오기와 프로젝트 저장',()=>{close();click('studio-open');});
   tile(tools,'캐릭터 · 모델 샘플','사람, 개구리, 건물과 탈것 둘러보기',()=>{close();click('sample-button');});
   tile(tools,'조명 설정','그림자, 반사, 주변광과 렌즈 비교',()=>{close();LookPanel.open();});
   tile(tools,'엔진 활용법','모드별 조작, 예제 코드와 제작 방법',()=>{close();Guide.toggle();});
@@ -85,6 +87,7 @@ const Workbench=(()=>{
     const idea=document.querySelector('[data-idea]');if(idea)idea.value=input.value;};
   function build(){
     sound.lastChild.textContent=document.getElementById('engine-sound').textContent;
+    if(Q.get('menu')==='visual'){VisualControls.open();return;}
     if(!Q.has('mode')&&!Q.has('project')&&!Q.has('capture')&&!Q.has('nopanel')&&!Q.has('guide')&&!Q.has('cam'))open('play');
     if(Q.get('menu')==='make')open('make');
   }
