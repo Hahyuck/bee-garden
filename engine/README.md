@@ -1,4 +1,6 @@
-# garden engine — 벌의 정원 방식으로 세운 독립 엔진
+# Bee Garden Game Engine
+
+Created by Creative Labs
 
 벌의 정원의 하늘·날씨·카메라를 토대로 만든 브라우저용 월드 엔진입니다. Three.js와 Rapier 위에서 지형을 생성하고, 실측한 암석·흙 재질과 뼈대가 있는 캐릭터를 같은 빛으로 그립니다.
 

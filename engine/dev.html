@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>garden engine</title>
+<title>Bee Garden Game Engine</title>
+<meta name="author" content="Creative Labs">
 <script>
 // Launch the standalone racing build before allocating the island or WebGL.
 // Preserve the project's pixel settings in a shareable engine/?mode=arcade URL.
@@ -12,7 +13,9 @@ if(new URLSearchParams(location.search).get('mode')==='arcade'){
 html,body{margin:0;height:100%;background:#0b0d0c;overflow:hidden}
 canvas{display:block;width:100vw;height:100vh;touch-action:none}
 #load{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0b0d0c;color:#f3e6d2;font:600 14px/1.6 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;z-index:10;transition:opacity .6s}
-#load h1{font-size:26px;margin:0;letter-spacing:.02em}
+#load header{text-align:center;padding:0 16px}
+#load h1{font-size:clamp(26px,5vw,52px);margin:0;line-height:1.1;letter-spacing:-.025em;text-wrap:balance}
+#load .creator{margin:8px 0 0;color:#e8bd6b;opacity:1;font-size:14px}
 #load p{margin:0;opacity:.7;font-weight:500;text-align:center}
 #track{width:min(360px,70vw);height:3px;background:rgba(243,230,210,.16);border-radius:2px;overflow:hidden}
 #bar{height:100%;width:0;background:#e8b54a;transition:width .2s}
@@ -36,7 +39,8 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
   <p id="sample-credits"></p><button id="sample-run" type="button"></button>
   <button id="sample-exit" type="button" hidden>자유 비행으로 돌아가기</button>
 </section>
-<div id="load"><h1>garden engine</h1><div id="track"><div id="bar"></div></div><div id="what">준비</div>
+<div id="load"><header lang="en"><h1>Bee Garden Game Engine</h1><p class="creator">Created by Creative Labs</p></header>
+<div id="track"><div id="bar"></div></div><div id="what">준비</div>
 <p>1 자유 · 2 벌 · 3 FPS · 4 레이싱 · 5 경비행 · 6 배 · 7 잠수함 · 8 낚시 · V 캐릭터<br>K 맑음 · I 비 · N 눈 · Y 혹한 · 9 자동 날씨<br>[ ] 시각 · T 시간 멈춤 · F 돌 · G 상자 · X 폭발 · M 소리<br>H 엔진 활용법</p></div>
 
 <script>window.GARDEN_PHYSICS=null;</script>
