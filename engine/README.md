@@ -10,9 +10,9 @@
 
 바위·갓길·흙에는 Poly Haven의 CC0 스캔 네 종을 사용했습니다. 색상과 표면 정보를 각기 한 장에 묶고, 표면 정보에는 OpenGL 노멀의 두 축, 거칠기, 상대 높이를 저장했습니다. [Rock Boulder Cracked](https://polyhaven.com/a/rock_boulder_cracked) · [Rock Ground 02](https://polyhaven.com/a/rock_ground_02) · [Brown Mud 02](https://polyhaven.com/a/brown_mud_02) · [Rock Face 03](https://polyhaven.com/a/rock_face_03) · [Poly Haven 라이선스](https://polyhaven.com/license)
 
-캐릭터 모드에서는 Polygonal Mind가 VRChat용으로 공개한 다섯 사람 중 하나를 조종합니다. Kate, 제니퍼, 리디아, 올드 머스태시, 우주비행사가 같은 지면에서 대기·걷기로 전환하며, 일정 거리 이상 떨어지면 Froggy가 도약해 따라옵니다. 각 아바타의 원본 메시·스킨·텍스처를 GLB에 담았습니다. [추가 아바타 원본과 출처](assets/samples/people/CREDITS.md) Froggy는 원작의 의인화된 개구리입니다. 로더는 Three.js r180의 MIT 라이선스 GLTFLoader와 BufferGeometryUtils에 기반합니다. [Kate 원본](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_038) · [Froggy 원본](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_010) · [Three.js GLTFLoader](https://github.com/mrdoob/three.js/blob/r180/examples/jsm/loaders/GLTFLoader.js)
+캐릭터 모드에서는 Polygonal Mind가 VRChat용으로 공개한 다섯 사람 중 하나를 조종합니다. Kate, 제니퍼, 리디아, 올드 머스태시, 우주비행사가 같은 지면에서 걷고 달리거나 점프하고 앉을 수 있으며, 일정 거리 이상 떨어지면 Froggy가 도약해 따라옵니다. 각 아바타의 원본 메시·스킨·텍스처를 GLB에 담았습니다. [추가 아바타 원본과 출처](assets/samples/people/CREDITS.md) Froggy는 원작의 의인화된 개구리입니다. 로더는 Three.js r180의 MIT 라이선스 GLTFLoader와 BufferGeometryUtils에 기반합니다. [Kate 원본](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_038) · [Froggy 원본](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_010) · [Three.js GLTFLoader](https://github.com/mrdoob/three.js/blob/r180/examples/jsm/loaders/GLTFLoader.js)
 
-오른쪽 **샘플**에서 제작자와 라이선스를 확인하고 모델을 GLB로 받을 수 있습니다. 현장 무전기, 쇼어라인 스포츠카, 스턴트기는 Sacchan-VRC의 VRChat 프로젝트에서 가져왔습니다. 건물은 rikeri의 VRChat 제작 튜토리얼에 쓰인 2층 멀티룸과 Kenney의 주택을 실었습니다. 자동차와 비행기는 형태·크기·재질을 살펴보는 정적 모델입니다. [월드 모델 출처](assets/samples/world/CREDITS.md) · [멀티룸 출처](assets/samples/world/CREDITS-RIKERI.md)
+오른쪽 **샘플**에서 제작자와 라이선스를 확인하고 모델을 GLB로 받을 수 있습니다. 현장 무전기, 쇼어라인 스포츠카, 스턴트기는 Sacchan-VRC의 VRChat 프로젝트에서 가져왔습니다. 건물은 rikeri의 VRChat 제작 튜토리얼에 쓰인 2층 멀티룸과 Kenney의 주택을 실었습니다. 샘플은 회전해서 보거나 **걸어서 보기**로 옆에 설 수 있습니다. 스턴트기는 경비행 모드에서도 조종할 수 있습니다. [월드 모델 출처](assets/samples/world/CREDITS.md) · [멀티룸 출처](assets/samples/world/CREDITS-RIKERI.md)
 
 ## 실행
 
@@ -23,16 +23,16 @@ python -m http.server 8765
 - `engine/dev.html` — 소스 파일을 하나씩 불러옵니다. 고치고 새로고침하면 반영됩니다.
 - `engine/index.html` — 한 파일로 합친 배포용. `python tools/build.py`로 다시 만듭니다(Windows는 `PYTHONUTF8=1`).
 
-주소 옵션: `?mode=free|bee|hike|drive|actors`, `?weather=clear|rain|snow|frost|auto`, `?day=17.5`(시각), `?still`(시간 멈춤), `?low`, `?cam=x,y,z,tx,ty,tz`.
+주소 옵션: `?mode=free|bee|fps|drive|flight|actors`, `?weather=clear|rain|snow|frost|auto`, `?day=17.5`(시각), `?still`(시간 멈춤), `?low`, `?cam=x,y,z,tx,ty,tz`.
 
 ## 조작
 
 | 키 | 동작 |
 |---|---|
-| `1` `2` `3` `4` | 자유 비행 · 벌 · 산행 · 운전 |
-| `V` | 캐릭터 조작. WASD나 방향키로 걷고 화면을 끌어 시점을 돌립니다. 터치 기기는 왼쪽 스틱으로 이동합니다. |
+| `1` ~ `5` | 자유 비행 · 벌 · FPS 사격장 · 해안 레이싱 · 경비행. 화면 오른쪽 모드 목록에서도 선택합니다. |
+| `V` | WASD·방향키 이동, Shift 달리기, Space 점프, C 앉기·일어서기. 오른쪽 위에서 캐릭터를 바꿉니다. 모바일은 왼쪽 스틱과 오른쪽 동작 버튼을 씁니다. |
 | 화면 오른쪽 **샘플** | 사람을 바꾸거나 소품·건물·자동차·비행기를 골라 정원에서 돌려 봅니다. 각 모델의 원본과 이용 조건을 함께 볼 수 있습니다. |
-| `5` `6` `7` `8` `9` | 맑음 · 비 · 눈 · 혹한 · 자동 날씨 |
+| `K` `6` `7` `8` `9` | 맑음 · 비 · 눈 · 혹한 · 자동 날씨 |
 | `[` `]` / `T` | 시각을 한 시간씩 옮기기 / 시간 흐름 멈춤 |
 | `F` `G` `X` | 돌 던지기 · 벌통 상자 놓기 · 폭발 |
 | `M` | 소리 |
@@ -40,11 +40,18 @@ python -m http.server 8765
 | `L` | 라이팅 비교 패널 보이기/숨기기 |
 | `B` | 벌 시점에서 겹눈 보기 |
 
-자유 비행: `W A S D`, `Q` `E` 높이, `Shift` 빠르게, 끌어서 둘러보기. 운전: `W S A D`, `Space` 핸드브레이크, `C` 카메라, `R` 도로 복귀, `Esc` 일시정지.
+| 모드 | 시작과 조작 |
+|---|---|
+| 3 FPS | 가상 블래스터로 발광 표적 5개를 맞힙니다. 마우스로 조준하고 왼쪽 버튼으로 발사합니다. R은 재장전, Esc는 마우스 해제입니다. |
+| 4 레이싱 | 운전석까지 걸어가 E로 승차합니다. W 가속, S 제동·후진, A/D 조향, Space 드리프트, C 시점, B 후방 보기, R 코스 복귀. 자동 변속으로 체크포인트 세 곳과 결승선을 통과하는 한 바퀴 타임 트라이얼입니다. |
+| 5 경비행 | 활주로의 경비행기에 다가가 E로 탑승합니다. W/S로 출력을 조절하고 A/D로 지상 조향·공중 선회, ↑/↓로 기수를 조절합니다. 착륙 후 Space로 제동하고 멈춰서 E로 내립니다. R로 활주로에 복귀합니다. |
+
+지형을 구성하는 삼각형에서 발밑 높이를 구합니다. 나무·바위·벌통, 탑승 대기 중인 탈것과 사격장 받침에 충돌체를 배치했습니다. 사람은 자세에 따라 크기가 바뀌는 캡슐로 장애물을 검사하고, 전시 건물의 문과 계단은 모델 자체의 삼각형을 사용합니다. 물리엔진 Rapier 0.19.3은 배포 파일에 포함됩니다. [충돌 윤곽을 표시한 건물](https://hahyuck.github.io/bee-garden/engine/?mode=sample&model=rikeri-multiroom&colliders) · [Rapier 라이선스](vendor/RAPIER-LICENSE)
+
 
 ## 라이팅 비교
 
-왼쪽 위 라이팅 패널은 `L`로 여닫습니다. 벌통 받침 아래에서 **접촉 음영**을 켜고 끄면 지면과 물체가 만나는 좁은 틈의 밝기를 비교할 수 있습니다. [비 갠 뒤 해안 도로](https://hahyuck.github.io/bee-garden/engine/?wet&weather=clear&still&day=16.6&cam=-415.647,12.942,-139.209,-424.934,10.75,-139.007,62,.11)에서는 **젖은 노면**을 눌러 바퀴 자국에 비치는 하늘을 살펴보세요. `6`을 누르면 다시 비가 오고, `5`를 누르면 비가 그치면서 고인 물도 서서히 빠집니다.
+왼쪽 위 라이팅 패널은 `L`로 여닫습니다. 벌통 받침 아래에서 **접촉 음영**을 켜고 끄면 지면과 물체가 만나는 좁은 틈의 밝기를 비교할 수 있습니다. [비 갠 뒤 해안 도로](https://hahyuck.github.io/bee-garden/engine/?wet&weather=clear&still&day=16.6&cam=-415.647,12.942,-139.209,-424.934,10.75,-139.007,62,.11)에서는 **젖은 노면**을 눌러 바퀴 자국에 비치는 하늘을 살펴보세요. `6`을 누르면 다시 비가 오고, `K`를 누르면 비가 그치면서 고인 물도 서서히 빠집니다.
 
 그림자, 공기, 땅의 되비침, 빛 필드, 빛기둥, 블룸, 노출 적응, 필름도 각각 비교할 수 있습니다. `기본 조명`과 `?look=plain`은 해와 하늘·땅 보조광, 그림자로 시작합니다. 각 스위치는 `G.look`과 `84_lookpanel.js`의 `PARTS`에 있습니다.
 
@@ -69,7 +76,10 @@ python -m http.server 8765
 | `86_audio.js` | 소리 출력과 바람·파도·빗소리(합성) |
 | `87_drive.js` | 차 |
 | `89_vr_actors.js` | GLB 뼈대 모델과 애니메이션을 불러와 지형을 따라 움직입니다. |
-| `88_modes.js` | 보는 방식(모드)과 그림자 범위 |
+| `41_surface.js` | 실제로 그려진 지형·도로·산길 삼각형의 높이 조회 |
+| `88_modes.js` | 플레이 모드 선택, 시점과 그림자 범위 |
+| `88_footing.js` · `89_vr_actors.js` | 캐릭터 캡슐, 동작 혼합, 발꿈치와 앞꿈치 접지 |
+| `89_fps.js` · `89_driving_mode.js` · `89_flight.js` | 사격장, 해안 타임 트라이얼, 활주로 탑승과 경비행 |
 | `90_main.js` | 빌드 순서와 프레임 루프 |
 | `91_guide.js` | 화면 안 안내서(`H`): 다섯 항목, 예시마다 코드와 `해보기` 버튼 |
 

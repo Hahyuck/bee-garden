@@ -67,9 +67,11 @@ const Garden = (() => {
   const NB = 18, beeSeed = Array.from({ length: NB }, () => [R(), R(), R(), R()]), beePos = Array.from({ length: NB }, () => V());
   let bees, beeWF, beeWB, catHead, catEyes, catLeg, catRest, ant = [], T = 0;
   async function build(scene, prog, tick) {
-    const t0 = performance.now(), IG = Island.GP; grp.position.set(IG.x, IG.y + .14, IG.z); scene.add(grp);
+    const t0 = performance.now(), IG = Island.GP; grp.position.set(IG.x, Island.support(IG.x,IG.z), IG.z); scene.add(grp);
     const mG = FXKit.mat({ sway: [.2, .12] }), mF = FXKit.mat({ sway: [.035, .12] }), mH = FXKit.mat({ sway: [.004, .12] }), mS = FXKit.mat(), mW = FXKit.mat({ alpha: .3 }), mWB = FXKit.mat({ alpha: .16 });
-    const B = K.buckets(grp, 2.4);
+    const B = K.buckets(grp, 2.4), plant=B.put;
+    B.put=(key,geo,mat,x,y,z,...args)=>plant(key,geo,mat,x,
+      y+Island.support(IG.x+x,IG.z+z)-grp.position.y,z,...args);
     // lawn: thick where the bee goes, thinning away from its route
     const tf = [0, 1, 2, 3].map(() => tuft(rr(4.5, 7), 6)), sp = LOW ? .05 : .033;
     for (let x = -8.6; x < 8.6; x += sp) for (let z = -6.6; z < 5.6; z += sp) { const d = routeD(x, z); if (d > 2.3) continue; const p = d < .45 ? 1 : lerp(1, .1, (d - .45) / 1.85); if (R() > p) continue;
@@ -90,7 +92,7 @@ const Garden = (() => {
     for (let i = 0; i < 110; i++) { const x = rr(-6.2, 4.4), z = R() < .5 ? rr(-3.98, -3.82) : rr(-5.6, -4.7); if (far(x, z, .26)) B.put('hos' + (i & 1), ph[i & 1], mF, x, 0, z, rr(0, TAU), S * rr(.7, 1.4)); }
     const ps = [sunflower(false), sunflower(false)]; [[5.96, -4.24], [6.62, -4.32], [6.94, -3.98], [5.78, -3.84], [7.22, -3.52], [6.5, -4.72]].forEach(([x, z], i) => B.put('sun' + (i & 1), ps[i & 1], mH, x, 0, z, rr(-.5, .5), S * rr(.85, 1.08)));
     G.info.gardenInst = B.flush({ cast: true, receive: true }); prog(.6); await tick();
-    const hero = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.setScalar(S); grp.add(m); return m; };
+    const hero = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y+Island.support(IG.x+x,IG.z+z)-grp.position.y, z); m.scale.setScalar(S); grp.add(m); return m; };
     hero(cosmos(true, 72, '#f08bb8'), mH, COS.x, 0, COS.z); hero(sunflower(true), mH, SH.x - .08, 0, SH.z);
     { // the hive: stand, landing board, two boxes and a roof (the bees' door is the dark slit under the front wall)
       const a = [], WH = '#e4dfcc'; for (const [x, z] of [[-18, -18], [14, -18], [-18, 14], [14, 14]]) a.push(K.box(x, x + 4, 0, 42, z, z + 4, '#5a4a3a', 4));
@@ -100,7 +102,7 @@ const Garden = (() => {
     const bg = beeGeo(), wf = K.merge([-1, 1].map(s => K.tag(K.leaf(.95, .34, { ns: 3, nw: 2, shape: K.shRound }), '#e8e4d8', 9, K.M([s * .1, .5, .12], [-Math.PI / 2 + .12, s * .22, 0])))), wb = K.merge([-1, 1].map(s => K.tag(K.leaf(1.05, 1, { ns: 3, nw: 3, shape: K.shRound }), '#ffffff', 9, K.M([s * .12, .46, .12], [-1, -s * 1.25, 0]))));
     bees = new THREE.InstancedMesh(bg, mS, NB); beeWF = new THREE.InstancedMesh(wf, mW, NB); beeWB = new THREE.InstancedMesh(wb, mWB, NB); for (const m of [bees, beeWF, beeWB]) { m.frustumCulled = false; grp.add(m); }
     // the cat
-    { const OR = '#c98a45', WH = '#efe4d2', PK = '#d98a8a', FQ = LOW ? .4 : 1, cat = new THREE.Group(); cat.position.copy(CAT); cat.rotation.y = Math.PI; cat.scale.setScalar(S); grp.add(cat);
+    { const OR = '#c98a45', WH = '#efe4d2', PK = '#d98a8a', FQ = LOW ? .4 : 1, cat = new THREE.Group(); cat.position.copy(CAT); cat.position.y+=Island.support(IG.x+CAT.x,IG.z+CAT.z)-grp.position.y; cat.rotation.y = Math.PI; cat.scale.setScalar(S); grp.add(cat);
       const ell = (c, r, col, nf, fl = 1.1, flow = [0, -.8, .5]) => { const a = [K.tag(K.sph(18, 12), col, 6, K.M(c, [0, 0, 0], r))]; if (nf) a.push(K.tag(K.fur(c, r, Math.floor(nf * FQ), fl, flow, R), col, 6)); return a; };
       const tail = new THREE.CatmullRomCurve3([V(0, 4, 15), V(9, 2.6, 17), V(16, 2.4, 9), V(17, 2.4, -3), V(12, 2.4, -12), V(5, 2.6, -15)]).getPoints(16);
       cat.add(new THREE.Mesh(K.merge([...ell([0, 9, 4], [12.5, 9, 14], OR, 3600), ...ell([0, 17, 0], [9.5, 15, 10.5], OR, 4200), ...ell([0, 25, -4.5], [7, 8, 6.5], WH, 2200, 1.4), K.tag(K.tube(tail, t => 2.3 - 1.1 * t, 8), OR, 6)]), mS));
@@ -170,5 +172,14 @@ const Garden = (() => {
     beeOn = true; return { speed: sp, walk: w };
   }
   function leave() { beeOn = false; C.fresh = true; for (const g of ant) g.visible = false; camL.set(0, 5, 0); }
-  return { build, bee, leave, DUR, grp, cat: null, get T() { return T; } };
+  function installSolids() {
+    const boxAt=(base,x,y,z,w,h,d)=> {
+      const wx=grp.position.x+base.x+x, wz=grp.position.z+base.z+z;
+      Phys.box(V(wx,Island.support(grp.position.x+base.x,grp.position.z+base.z)+y,wz),V(w,h,d));
+    };
+    for (const x of [-.16,.16]) for (const z of [-.16,.16]) boxAt(HIVE,x,.21,z,.04,.42,.04);
+    boxAt(HIVE,.045,.43,0,.53,.025,.44); boxAt(HIVE,0,.71,0,.41,.54,.41);
+    boxAt(CAT,0,.18,0,.24,.36,.30);
+  }
+  return { build, bee, leave, installSolids, DUR, grp, cat: null, get T() { return T; } };
 })();

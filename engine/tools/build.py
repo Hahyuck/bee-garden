@@ -82,6 +82,10 @@ def script_json(value):
 
 samples = sample_catalog()
 out = shell.replace("{{THREE}}", three).replace("{{APP}}", joined)
+if "{{RAPIER_MODULE}}" in out:
+    with open(os.path.join(V, "rapier.mjs"), "rb") as module:
+        physics_url = "data:text/javascript;base64," + base64.b64encode(module.read()).decode("ascii")
+    out = out.replace("{{RAPIER_MODULE}}", json.dumps(physics_url))
 if "{{GEOLOGY_MAPS}}" in out:
     out = out.replace("{{GEOLOGY_MAPS}}", json.dumps({k: embed_map(path) for k, path in geology.items()}))
 if "{{ACTOR_MODELS}}" in out:
@@ -97,6 +101,7 @@ if not WS:
     names = [os.path.basename(f) for f in sorted(glob.glob(os.path.join(SRC, "*.js")))]
     loader = ("import('./vendor/three.module.min.js').then(async T => { window.THREE = T; for (const f of " + repr(names) + ") await new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'src/' + f + '?' + Date.now(); s.onload = ok; s.onerror = () => no(new Error('could not load ' + f)); document.head.appendChild(s); }); });")
     dev = shell.replace("<script>{{THREE}}</script>", "").replace("{{APP}}", loader)
+    dev = dev.replace("{{RAPIER_MODULE}}", "null")
     dev = dev.replace("{{GEOLOGY_MAPS}}", json.dumps(geology)).replace("{{ACTOR_MODELS}}", json.dumps(actors))
     dev = dev.replace("{{SAMPLE_CATALOG}}", script_json(samples))
     dev = dev.replace("{{ACTOR_LOADER}}", '<script src="vendor/gltf-loader-r180.js"></script>')

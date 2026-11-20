@@ -5,9 +5,9 @@ const Guide = (() => {
   const AIM = 'const c = G.camera, d = c.getWorldDirection(new THREE.Vector3());\n';
   const PARTS = [
     { t: '1. 둘러보기', lead: '이 엔진은 세계 하나와, 그 안에 있는 방법(모드) 여러 개로 이뤄져 있습니다. 숫자 키로 모드를 바꾸고, 이 안내는 H로 여닫습니다.', ex: [
-      { t: '모드 바꾸기', d: '1 자유 비행 · 2 벌 · 3 산행 · 4 운전. 코드에서는 한 줄입니다.', code: "Modes.set('drive');", run: 1 },
+      { t: '모드 바꾸기', d: '1 자유 비행 · 2 벌 · 3 FPS · 4 레이싱 · 5 경비행. 화면 오른쪽 목록에서도 고를 수 있습니다.', code: "Modes.set('drive');", run: 1 },
       { t: '자유 비행으로 돌아오기', d: 'W A S D 이동, 화면을 끌어서 둘러보기, Q E 높이, Shift 빠르게.', code: "Modes.set('free');", run: 1 },
-      { t: '정원에서 캐릭터 조작', d: 'WASD·방향키 또는 왼쪽 터치 스틱으로 걷고 화면을 끌어 시점을 돌립니다. Froggy가 뒤따라옵니다. 오른쪽 샘플 메뉴에서 사람을 바꾸거나 월드 오브젝트를 열 수 있습니다.', code: "Modes.set('actors');", run: 1 },
+      { t: '정원에서 캐릭터 조작', d: 'WASD 이동, Shift 달리기, Space 점프, C 앉기입니다. 위쪽에서 캐릭터를 바꾸고, 터치 화면에서는 왼쪽 스틱과 오른쪽 동작 버튼을 사용합니다.', code: "Modes.set('actors');", run: 1 },
       { t: '해안의 바위와 흙', d: '정원 끝 바위로 돌아갑니다. 가까이 다가가 표면의 갈라진 결을 보고, 위쪽 숲으로 시선을 돌리면 오후 햇빛이 드는 방향을 읽을 수 있습니다.', code: 'Modes.visitOutcrop();\nG.day = 16.15;', run: 1 },
       { t: '벌의 눈으로 보기', d: '어안 렌즈와 자동 초점이 켜집니다. B를 누르면 겹눈으로 봅니다.', code: "Modes.set('bee');", run: 1 },
       { t: '주소로 시작 상태 정하기', d: '코드를 고치지 않고 장면을 고정합니다. 주소 뒤에 붙입니다.', code: '?mode=drive&day=17.5&still     해질녘에 멈춘 시간, 운전\n?weather=snow&day=9            아침, 눈\n?look=plain                    기본 조명만\n?low                           가벼운 설정' },
@@ -16,7 +16,7 @@ const Guide = (() => {
       { t: '눈 내리게 하기', d: '기온이 내려가고 눈이 쌓이기 시작합니다. 20초쯤 지나면 땅이 덮입니다. 키로는 7.', code: "Weather.set('snow');", run: 1 },
       { t: '비와 폭풍', d: '구름이 덮이고 바람이 세지며, 흙이 젖고 도로가 미끄러워집니다. 키로는 6.', code: "Weather.set('rain');", run: 1 },
       { t: '비 갠 뒤 해안 도로', d: '해안 굽잇길을 낮게 바라봅니다. L 패널에서 젖은 노면을 누르면 바퀴 자국에 반사되는 하늘을 비교할 수 있습니다.', code: "Modes.set('free');\nModes.fly.p.set(-415.647, 12.942, -139.209);\nModes.fly.yaw = 1.593;\nModes.fly.pitch = -.232;\nG.day = 16.6;\nWeather.set('clear');\nWeather.S.wet = .95;\nWeather.S.pooled = .91;", run: 1 },
-      { t: '맑은 날로', d: '눈이 녹으면서 땅을 적십니다. 키로는 5.', code: "Weather.set('clear');", run: 1 },
+      { t: '맑은 날로', d: '눈이 녹으면서 땅을 적십니다. 키로는 K.', code: "Weather.set('clear');", run: 1 },
       { t: '해질녘으로', d: 'G.day가 시각(0~24)입니다. 키로는 [ 와 ], T는 시간 멈춤.', code: 'G.day = 17.6;', run: 1 },
       { t: '한밤으로', d: '달이 해를 이어받고, 노출이 천천히 열립니다.', code: 'G.day = 23;', run: 1 },
       { t: '아침으로', d: '해가 낮을 때는 물 위에 안개가 깔리고 나무 사이로 빛줄기가 샙니다.', code: 'G.day = 6.6;', run: 1 },
@@ -41,9 +41,9 @@ const Guide = (() => {
       { t: '배포용 한 파일 만들기', d: '새 파일을 더했거나 웹에 올릴 때 한 번 돌립니다. index.html이 다시 만들어집니다.', code: 'python tools/build.py' },
     ] },
     { t: '5. 게임 엔진으로 활용하는 방법', lead: '지형, 날씨, 물리, 차량과 카메라를 조합해 장르를 구성합니다. V 모드에서 외부 GLB 캐릭터를 직접 조작하고, 샘플 메뉴에서 모델의 크기와 재질을 살펴볼 수 있습니다.', ex: [
-      { t: '3인칭 레이싱 (가장 가까움)', d: '차, 코스, 랩 타임, 날씨별 접지력이 이미 있습니다. 더할 것은 경쟁 차, 출발 신호, 순위입니다. 경쟁 차는 사람의 입력 대신 "도로의 앞 지점을 향해 조향"하는 계산값을 넣으면 됩니다.', code: "// 도로의 앞 지점을 향하는 조향 (경쟁 차의 뼈대)\nconst road = Island.nearRoad(car.p.x, car.p.z), RD = Island.RD;\nconst j = (road.i + 8) % RD.n;                     // 16m 앞\nconst steer = Math.atan2(RD.px[j] - car.p.x, RD.pz[j] - car.p.z) - heading;" },
-      { t: '1인칭 슈팅', d: '던지기, 폭발, 광선 검사가 발사와 피격의 뼈대입니다. 더할 것은 땅을 걷는 몸, 표적과 체력, 조준점입니다. 아래는 즉시 맞는 총 한 발입니다.', code: AIM + 'const hit = Phys.ray(c.position, d, 200);\nif (hit) Phys.blast(hit.x, hit.y, hit.z, 300, 3);', run: 1 },
-      { t: '3인칭 비행 시뮬레이션', d: '하늘, 바다, 섬, 바람이 있고, 물리에 매 스텝 힘을 넣는 길이 있습니다. 더할 것은 비행기 몸체, 양력과 항력, 계기입니다. 차가 바퀴 힘을 넣는 것과 같은 자리에 날개의 힘을 넣습니다.', code: "Phys.pre.push(h => {\n  const v = body.linvel(), speed2 = v.x * v.x + v.y * v.y + v.z * v.z;\n  const lift = .5 * 1.2 * speed2 * wingArea * liftCoef;      // 양력 = ½ρv²SC\n  body.applyImpulse({ x: up.x * lift * h, y: up.y * lift * h, z: up.z * lift * h }, true);\n});" },
+      { t: '해안 레이싱', d: '운전석으로 다가가 E로 탑승합니다. 자동 변속으로 3개 체크포인트와 결승선을 통과합니다. W 가속, A/D 조향, Space 드리프트, R 코스 복귀입니다.', code: "Modes.set('drive');", run: 1 },
+      { t: 'FPS 사격장', d: '마우스로 표적을 조준하고 왼쪽 버튼으로 발사합니다. R로 재장전하고 Space로 점프하거나 C로 자세를 낮출 수 있습니다.', code: "Modes.set('fps');", run: 1 },
+      { t: '경비행', d: '활주로의 조종석으로 다가가 E로 탑승합니다. W/S 출력, ↑/↓ 기수, A/D 선회, 착륙 후 Space 제동입니다.', code: "Modes.set('flight');", run: 1 },
       { t: '3인칭 RPG', d: 'V 모드의 캐릭터 이동, 추적 카메라, 대기·걷기 전환을 활용할 수 있습니다. 여기에 상호작용, 대화와 인벤토리를 연결해 보세요.', code: '' },
       { t: '대화로 만들기', d: '이 엔진은 원하는 것을 말하면 Claude가 해당 파일을 고치는 방식으로 자랐습니다. 구체적으로, 보이는 대로 말할수록 결과가 좋습니다.', code: '"차가 너무 미끄러워"                → 02_config.js의 접지력 조정\n"밤에 전조등이 켜지게 해 줘"         → 87_drive.js에 조명 추가\n"해안 도로에 헤어핀을 두 개 넣어 줘" → 42_island.js의 도로 수정\n"가지 끝이 보라색으로 보여"          → 원인을 찾아 렌즈 값 수정' },
       { t: '다음에 키울 강점', d: '세계를 코드가 아닌 데이터 파일 하나로 적으면 세 가지가 한꺼번에 됩니다: 대화로 물체를 놓는 월드 빌딩, "움직인다, 무게는 얼마"라고만 적으면 붙는 물리, 불러온 GLB에 그림자·충돌·눈 쌓임이 자동으로 입혀지는 환경. 아직 만들지 않았습니다.', code: '' },

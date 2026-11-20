@@ -53,7 +53,14 @@ const Island = (() => {
     for (let i = 0; i < n; i++) { let s = 0; for (let k = -3; k <= 3; k++) { const a = (i + k + n) % n, b = (a + n - 1) % n; let d = hd[a] - hd[b]; d = Math.atan2(Math.sin(d), Math.cos(d)); s += d / 2; } RD.k[i] = s / 7; }      // signed curvature (1/m): positive bends to the right
     RD.n = n; RD.len = n * 2; }
   // what a wheel finds under it: [height, surface] (0 asphalt, 1 gravel shoulder, 2 grass and earth, 3 sand)
-  function surf(x, z) { const r = nearRoad(x, z); if (r.d <= 3.5) return [r.y + .08 - .012 * r.d, 0]; if (r.d < 4.6) return [lerp(r.y + .04, r.y - .02, (r.d - 3.5) / 1.1), 1]; const y = ground(x, z); return [y, y < 3.2 ? 3 : 2]; }
+  function support(x,z) {
+    const height = GroundSurface.height(x,z,Math.max(Math.abs(x-GP.x),Math.abs(z-GP.z))<29);
+    return Number.isFinite(height) ? height : ground(x,z);
+  }
+  function surf(x,z) {
+    const y=support(x,z), d=nearRoad(x,z).d;
+    return [y,d<=3.5 ? 0 : d<4.6 ? 1 : y<3.2 ? 3 : 2];
+  }
   const wetState = { value: new THREE.Vector4(0, 0, 1, CFG.surface.rippleRange) };
   const waterShader = /* glsl */`
 uniform float uTime; uniform vec4 uStandingWater;
@@ -173,7 +180,7 @@ vec3 rdSurface(){
         pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z; rd[k * 3] = i * 2; rd[k * 3 + 1] = off; rd[k * 3 + 2] = RD.k[ii]; k++; }
       if (i < n) for (let j = 0; j < C - 1; j++) { const a0 = i * C + j, b0 = a0 + 1, c0 = a0 + C, d0 = c0 + 1; idx.push(a0, b0, c0, b0, d0, c0); } }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aRd', new THREE.BufferAttribute(rd, 3)); g.setAttribute('aDrain', new THREE.BufferAttribute(drain,1,true)); g.setIndex(idx); g.computeVertexNormals();
-    const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.name = 'road'; return m; }
+    const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.name = 'road'; GroundSurface.strip(m,false); return m; }
   const micro = (x, z) => (NZ.fbm(x / 7, 0, z / 7, 3) + .5) * .5 + (NZ.n3(x / 1.3, 0, z / 1.3) + 1) * .05;
   const grad = (x, z) => { const e = 3; return [(H0(x + e, z) - H0(x - e, z)) / (2 * e), (H0(x, z + e) - H0(x, z - e)) / (2 * e)]; };
   const tlAt = (x, z) => TREELINE + NZ.n3(x * .012, 0, z * .012) * 13;
@@ -313,7 +320,7 @@ vec3 isGround(){
     }
     for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) { const a = j * n + i, b = a + 1, c = a + n, d = c + 1; idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = b; idx[q++] = c; idx[q++] = d; }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPath', new THREE.BufferAttribute(pa, 1)); g.setAttribute('aDrain',terrainDrain(pos,n,n,Math.max(1,Math.round(3*(n-1)/w)))); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
-    const m = new THREE.Mesh(g, mat); m.receiveShadow = true; return m; }
+    const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.name = skirt ? 'garden-terrace' : 'island-ground'; GroundSurface.grid(m,n,x0,z0,w); return m; }
   function ribbon(mat) {       // fine ground laid along the trail: 33 cm cells at the path, widening to the sides, with the path cut flat
     const OFF = [0, .33, .66, 1, 1.4, 1.9, 2.5, 3.2, 4.1, 5.2, 6.4, 7.6, 8.4], W = OFF.length - 1, C = 2 * W + 1, n = T.n, pos = new Float32Array(n * C * 3), pa = new Float32Array(n * C), idx = []; let k = 0;
     for (let i = 0; i < n; i++) { const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); let tx = T.px[b] - T.px[a], tz = T.pz[b] - T.pz[a]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
@@ -321,7 +328,7 @@ vec3 isGround(){
         pos[k * 3] = x; pos[k * 3 + 1] = Math.abs(j) === W ? H0(x, z) - 1 : fineH(x, z, d, T.py[i]); pos[k * 3 + 2] = z; pa[k] = 3 - sm(.4, 1.05, d); k++; }
       if (i < n - 1) for (let j = 0; j < C - 1; j++) { const a0 = i * C + j, b0 = a0 + 1, c0 = a0 + C, d0 = c0 + 1; idx.push(a0, b0, c0, b0, d0, c0); } }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPath', new THREE.BufferAttribute(pa, 1)); g.setAttribute('aDrain',terrainDrain(pos,C,n,2)); g.setIndex(idx); g.computeVertexNormals();
-    const m = new THREE.Mesh(g, mat); m.receiveShadow = true; return m; }
+    const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.name = 'trail-ground'; GroundSurface.strip(m,true); return m; }
 
   // ---- what grows on it (prototypes in metres) ----
   // a conifer as tiers of drooping boughs: each tier is a skirt whose rim is ragged in the shader (material 23), so the outline is boughs, not a cone
@@ -354,7 +361,7 @@ vec3 isGround(){
         const rockBed=Math.hypot((x+233)*.83,(z+268)*1.25);
         pr*=.13+.87*sm(6,18,rockBed);
         if (u > pr) continue; const o = nearTrail(x, z); if (o.d < .8 || nearRoad(x, z).d < 4.8) continue; const g = grad(x, z); if (g[0] * g[0] + g[1] * g[1] > 1.3) continue;
-        const k = scale * sc * (.7 + .7 * r()); m.compose(p.set(x, ground(x, z) - .03, z), q.setFromAxisAngle(YA, r() * TAU), s.set(k, k * (.8 + .5 * r()), k)); im.setMatrixAt(c, m); im.setColorAt(c, col.copy(pal[Math.floor(r() * pal.length)])); c++; }
+        const k = scale * sc * (.7 + .7 * r()); m.compose(p.set(x, support(x, z) - .025, z), q.setFromAxisAngle(YA, r() * TAU), s.set(k, k * (.8 + .5 * r()), k)); im.setMatrixAt(c, m); im.setColorAt(c, col.copy(pal[Math.floor(r() * pal.length)])); c++; }
       im.count = c; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; };
     tiles.push(set); return set; }
   function followGrass(cam) { for (const set of tiles) { const cx = Math.floor(cam.x / set.size), cz = Math.floor(cam.z / set.size), h = (set.n - 1) / 2, want = new Set();
@@ -394,8 +401,8 @@ vec3 isGround(){
     const random=rng(82014);
     function place(x,z,rise,size,angle,kind){
       if(nearRoad(x,z).d < 5.6+size || nearTrail(x,z).d<.85+size || Math.hypot(x-GP.x,z-GP.z)<11.8+size*.72) return;
-      const floor=ground(x,z);
-      const low=Math.min(ground(x+size*.62,z),ground(x-size*.62,z),ground(x,z+size*.62),ground(x,z-size*.62));
+      const floor=support(x,z);
+      const low=Math.min(support(x+size*.62,z),support(x-size*.62,z),support(x,z+size*.62),support(x,z-size*.62));
       const footing=floor+.12*rise+.49*(low-floor);
       B.put('r'+kind,rocks[kind],material,x,footing,z,angle,size,rise,RKC[kind]);
     }
@@ -449,32 +456,68 @@ vec3 isGround(){
     const P = { near: [conifer(false, 15, 18, true, .34, 3), conifer(true, 13, 18, true, .34, 3)], mid: [conifer(false, 8, 10), conifer(true, 7, 10)], far: [outline(), outline()],
       tuft: [tuft(.36, 14), tuft(.3, 14), tuft(.42, 13)], bil: [bilberry(), bilberry()], fern: [fern(), fern()], rock: [0, 1, 2, 3].map(i => Geology.fragment(i)),
       log: K.merge([K.tag(K.tube([V(-2.2, .16, 0), V(0, .2, .1), V(2.2, .14, 0)], t => .17 - .05 * t, 7), '#b8ab98', 4), K.tag(K.tube([V(.6, .2, 0), V(.9, .5, .3), V(1.1, .9, .4)], t => .05 - .03 * t, 4), '#b8ab98', 4)]) };
-    const B = K.buckets(grp, 60); { const put0 = B.put; B.put = (key, geo, mat, x, y, z, rot, s, sy, col, ...more) => { if (key[0] === 'r' && s >= .45) ROCKS.push([x, y, z, s, sy === undefined ? s : sy]); return put0.call(B, key, geo, mat, x, y, z, rot, s, sy, col, ...more); }; }
+    const B = K.buckets(grp,60), putInstance=B.put;
+    // The same per-prototype extremal vertices support the stone on a slope and define
+    // its convex collision hull, using the visible instance's scale and orientation.
+    function envelope(geo) {
+      if (geo.userData.hull) return geo.userData.hull;
+      const vertices=geo.attributes.position.array, indices=new Set();
+      for (let dx=-1;dx<=1;dx++) for (let dy=-1;dy<=1;dy++) for (let dz=-1;dz<=1;dz++) {
+        if (!dx && !dy && !dz) continue;
+        let best=-Infinity, idx=0;
+        for (let i=0;i<vertices.length;i+=3) {
+          const dot=dx*vertices[i]+dy*vertices[i+1]+dz*vertices[i+2];
+          if (dot>best) { best=dot;idx=i; }
+        }
+        indices.add(idx);
+      }
+      return geo.userData.hull=Array.from(indices).flatMap(i=>[vertices[i],vertices[i+1],vertices[i+2]]);
+    }
+    B.put=function(key,geo,mat,x,y,z,rot,s,sy=s,col,...rest) {
+      if (key[0]==='r' || key==='log') {
+        const hull=envelope(geo), cosine=Math.cos(rot), sine=Math.sin(rot);
+        const supports=[];
+        for (let i=0;i<hull.length;i+=3) {
+          if (hull[i+1]>0 && key!=='log') continue;
+          const dx=s*(hull[i]*cosine+hull[i+2]*sine), dz=s*(hull[i+2]*cosine-hull[i]*sine);
+          supports.push(support(x+dx,z+dz)-hull[i+1]*sy);
+        }
+        supports.sort((a,b)=>b-a);
+        if (supports.length) {
+          // Bury the downhill rim, so an individual contact on the uphill edge cannot prop
+          // a stone in the air. Omit loose scree on nearly vertical road cuts.
+          if (supports[0]-supports[supports.length-1]>2.5*s && key!=='log') return;
+          y=Math.min(y,supports[Math.min(supports.length-1,Math.floor(supports.length*.56))]-.025);
+        }
+        if (s>=.22 || key==='log') ROCKS.push([x,y,z,s,sy,rot,hull]);
+      }
+      putInstance(key,geo,mat,x,y,z,rot,s,sy,col,...rest);
+    };
     // forest: trees everywhere under the treeline, larches as it nears
     const cell = LOW ? 9 : 6.5; for (let x = IC.x - 520; x < IC.x + 520; x += cell) for (let z = IC.z - 520; z < IC.z + 520; z += cell) { const px = x + rr(0, cell), pz = z + rr(0, cell), h = H0(px, pz); if (h < 9 || h > tlAt(px, pz) || R() > .86) continue;
       if (Math.hypot(px - GP.x, pz - GP.z) < 24 || nearTrail(px, pz).d < 5.5 || nearRoad(px, pz).d < 9) continue; const g = grad(px, pz); if (Math.hypot(g[0], g[1]) > 1.0) continue;
-      const larch = R() < sm(150, 200, h) * .92 + .04; addTree(px, h - .45, pz, larch, rr(.7, 1.3) * (larch ? .85 : 1)); }
+      const larch = R() < sm(150, 200, h) * .92 + .04; addTree(px, support(px,pz) - .15, pz, larch, rr(.7, 1.3) * (larch ? .85 : 1)); }
     prog(.65); await tick();
     // along the trail: ferns and bilberry under the trees, rock above them
     for (let i = 8; i < T.n; i++) { const h = T.py[i], a = Math.max(0, i - 1), b = Math.min(T.n - 1, i + 1); let tx = T.px[b] - T.px[a], tz = T.pz[b] - T.pz[a]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
       const at = (off, along) => [T.px[i] - tz * off + tx * along, T.pz[i] + tx * off + tz * along], forest = h < tlAt(T.px[i], T.pz[i]) - 4, meadow = !forest && h < MEADOW + 6;
-      const put = (key, geo, mat, off, s, sy, col, sink = 0) => { const [x, z] = at(off, rr(-.5, .5)); if (nearTrail(x, z).d < Math.min(Math.abs(off), .75)) return; B.put(key, geo, mat, x, ground(x, z) - sink, z, rr(0, TAU), s, sy, col); };
+      const put = (key, geo, mat, off, s, sy, col, sink = 0) => { const [x, z] = at(off, rr(-.5, .5)); if (nearTrail(x, z).d < Math.min(Math.abs(off), .75)) return; B.put(key, geo, mat, x, support(x, z) - sink, z, rr(0, TAU), s, sy, col); };
       if (forest) { if (R() < .8) put('f' + (i & 1), P.fern[i & 1], mShrub, (R() < .5 ? -1 : 1) * rr(.9, 5), rr(.7, 1.4)); if (R() < .4) put('b' + (i & 1), P.bil[i & 1], mShrub, (R() < .5 ? -1 : 1) * rr(.9, 4), rr(.8, 1.5)); }
       else if (meadow) { if (R() < .6) put('b' + (i & 1), P.bil[i & 1], mShrub, (R() < .5 ? -1 : 1) * rr(.9, 5), rr(.9, 1.9)); }
       else for (let k = 0; k < 4; k++) put('r' + (k & 3), P.rock[k & 3], mStone, (R() < .5 ? -1 : 1) * rr(.75, 5), rr(.12, .42), undefined, pick(RKC), .05);
       if (R() < .14) put('r' + (i & 3), P.rock[i & 3], mStone, (R() < .5 ? -1 : 1) * rr(1.6, 6), rr(.3, .9), undefined, pick(RKC), .2); }
-    for (let k = 0; k < 420; k++) { const an = rr(0, TAU), r = Math.sqrt(R()) * 70, x = SUMMIT.x + Math.cos(an) * r, z = SUMMIT.z + Math.sin(an) * r; if (nearTrail(x, z).d < 2.4 || r < 6) continue; const s = rr(.5, 2.4); B.put('r' + (k & 3), P.rock[k & 3], mStone, x, ground(x, z) - s * .2, z, rr(0, TAU), s, s * rr(.6, 1), pick(RKC)); }
+    for (let k = 0; k < 420; k++) { const an = rr(0, TAU), r = Math.sqrt(R()) * 70, x = SUMMIT.x + Math.cos(an) * r, z = SUMMIT.z + Math.sin(an) * r; if (nearTrail(x, z).d < 2.4 || r < 6) continue; const s = rr(.5, 2.4); B.put('r' + (k & 3), P.rock[k & 3], mStone, x, support(x, z) - s * .2, z, rr(0, TAU), s, s * rr(.6, 1), pick(RKC)); }
     // the shore: pebbles, boulders and driftwood where the land meets the water
     for (let k = 0; k < 1500; k++) { const an = rr(0, TAU), c = Math.cos(an), s = Math.sin(an); let r = 520; for (; r > 300; r -= 4) if (H0(IC.x + c * r, IC.z + s * r) > .3) break; r -= rr(0, 16); const x = IC.x + c * r, z = IC.z + s * r, h = H0(x, z); if (h < -.3 || h > 4.5 || nearRoad(x, z).d < 5.2) continue;
-      if (R() < .035) B.put('log', P.log, mStill, x, h - .05, z, rr(0, TAU), rr(.6, 1.3)); else { const sc = R() < .08 ? rr(.5, 1.6) : rr(.06, .3); B.put('r' + (k & 3), P.rock[k & 3], mStone, x, h - sc * .25, z, rr(0, TAU), sc, sc * rr(.5, .9), pick(RKC)); } }
+      if (R() < .035) B.put('log', P.log, mStill, x, support(x,z) - .05, z, rr(0, TAU), rr(.6, 1.3)); else { const sc = R() < .08 ? rr(.5, 1.6) : rr(.06, .3); B.put('r' + (k & 3), P.rock[k & 3], mStone, x, support(x,z) - sc * .25, z, rr(0, TAU), sc, sc * rr(.5, .9), pick(RKC)); } }
     talus(B,P.rock,mStone);
     G.info.islandInst = B.flush({ cast: true, receive: true }); G.info.trees = buildForest(grp, P, mTree);
     { const a = [], x = SUMMIT.x + 1.6, z = SUMMIT.z - 2.2;       // the cairn
       for (let i = 0; i < 16; i++) { const lv = Math.floor(i / 4), an = i * 1.7, r = (.5 - lv * .11) * (i % 4 ? 1 : .3), s = rr(.2, .3) * (1 - lv * .12); a.push(K.tag(K.blob(i * 3.1, .3), pick(['#8d8a86', '#7c7a78', '#9a958e']), 7, K.M([Math.cos(an) * r, .12 + lv * .27, Math.sin(an) * r], [rr(-.3, .3), rr(0, 6), rr(-.3, .3)], [s * 1.2, s * .7, s]))); }
-      const cm = new THREE.Mesh(K.merge(a), mStone); cm.position.set(x, ground(x, z), z); cm.castShadow = cm.receiveShadow = true; grp.add(cm); }
+      const cm = new THREE.Mesh(K.merge(a), mStone); cm.position.set(x, support(x, z), z); cm.castShadow = cm.receiveShadow = true; grp.add(cm); }
     tileSet(grp, 7, 5, LOW ? 500 : 1100, P.tuft, mGrass, 1); tileSet(grp, 20, 7, LOW ? 500 : 1000, P.tuft, mGrass, 2.3);
     G.tick.push(() => { followGrass(G.camera.position); followForest(G.camera.position); }); followGrass(V(GP.x, 0, GP.z)); while (tileQ.length) followGrass(V(GP.x, 0, GP.z)); followForest(V(GP.x, 0, GP.z));
     G.info.island = { trail: T.n, road: RD.len, summit: [Math.round(SUMMIT.x), Math.round(SUMMIT.y), Math.round(SUMMIT.z)], ms: Math.round(performance.now() - t0) }; prog(1);
   }
-  return { build, H0, ground, surf, nearTrail, nearRoad, RD, T, SUMMIT, GP, IC, TREELINE, MEADOW, FOREST, ROCKS };
+  return { build, H0, ground, support, surf, nearTrail, nearRoad, RD, T, SUMMIT, GP, IC, TREELINE, MEADOW, FOREST, ROCKS };
 })();

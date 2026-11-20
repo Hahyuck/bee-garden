@@ -35,7 +35,8 @@
   function frame(t, dt) { G.t = G.tAbs = t; G.uTime.value = t;
     Modes.step(camera, dt); camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
     for (const f of G.tick) f(t, dt);
-    Post.render(scene, camera, dt); }
+    Post.render(scene, camera, dt);
+    if (Modes.cur === 'drive') DriveRace.renderMirror(R,scene,dt); }
   window.__frameAt = (t, dt = 1 / 60) => frame(t, dt);
   frame(0, 1 / 60); loader.style.opacity = 0; setTimeout(() => loader.remove(), 700);
   if (!CAPTURE) { let last = performance.now(), t = 0; const loop = now => { const dt = Math.min((now - last) / 1000, .1); last = now; t += dt; frame(t, dt); G.info.fps = Math.round(1 / Math.max(dt, .001)); requestAnimationFrame(loop); }; requestAnimationFrame(loop); }

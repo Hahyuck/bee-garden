@@ -3,7 +3,7 @@
 //      so nothing here needs a rebuild of anything else. Units are SI: metres, seconds, kilograms, newtons, degrees Celsius. ----
 const CFG = {
   phys: {
-    engineUrl: 'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs',
+    engineUrl: window.GARDEN_PHYSICS || new URL('vendor/rapier.mjs',document.baseURI).href,
     step: 1 / 240,            // fixed step of the rigid-body world
     gravity: -9.81,
     tile: 32,                 // side of one ground tile made solid around the focus

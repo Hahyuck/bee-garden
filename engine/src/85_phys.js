@@ -8,6 +8,10 @@ const Phys = (() => {
   const PC = CFG.phys, URL = PC.engineUrl, H = PC.step, TS = PC.tile, SEA = PC.seaLevel;
   let R = null, world = null, ready = false, acc = 0, hold = false, scene = null, steps = 0, stepMs = 0;
   const pre = [], bodies = [], tiles = new Map(), cells = new Map(), queue = [], focus = new THREE.Vector3(1e9, 0, 0), wind = new THREE.Vector3(), blasts = [];
+  const terrainHandles = new Set(), idRotation = {x:0,y:0,z:0,w:1};
+  const obstaclesOnly = c => !terrainHandles.has(c.handle);
+  let playerBody = null, playerCollider = null, playerHeight = 0, playerRadius = 0;
+  let companionBody = null;
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _c = new THREE.Color(), _v = { x: 0, y: 0, z: 0 }, _d = new THREE.Vector3(), _f = new THREE.Vector3();
   const std = (c, m, ro) => new THREE.MeshStandardMaterial({ color: c, metalness: m, roughness: ro });
   // the kinds of loose thing the world knows how to make. vol: displaced volume (for the sea), area: what the wind gets hold of
@@ -22,28 +26,67 @@ const Phys = (() => {
   async function init(sc) { scene = sc; const t0 = performance.now();
     try { const m = await import(URL); R = m.default || m; await R.init(); world = new R.World({ x: 0, y: PC.gravity, z: 0 }); world.timestep = H;
       for (const k in KIND) { const K = KIND[k], im = new THREE.InstancedMesh(K.geo(), std(0xffffff, k === 'barrel' ? .5 : 0, k === 'barrel' ? .45 : .85), K.n); im.count = 0; im.frustumCulled = false; im.castShadow = im.receiveShadow = true; im.setColorAt(0, _c.set(K.tint)); scene.add(im); K.im = im; K.used = 0; }
-      statics(); ready = true; G.tick.push((t, dt) => step(dt)); G.info.phys = { engine: 'rapier ' + (R.version ? R.version() : ''), ms: Math.round(performance.now() - t0) };
+      statics(); ready = true; Garden.installSolids(); G.tick.push((t, dt) => step(dt));
+      if (Q.has('colliders')) showColliderOutlines(sc);
+      G.info.phys = { engine: 'rapier ' + (R.version ? R.version() : ''), ms: Math.round(performance.now() - t0) };
     } catch (e) { G.info.phys = { off: String(e && e.message || e) }; console.warn('physics engine not loaded; the world runs without it', e); }
     return ready; }
 
+  function showColliderOutlines(scene) {
+    const geometry=new THREE.BufferGeometry(), lines=new THREE.LineSegments(geometry,
+      new THREE.LineBasicMaterial({color:0x3af3cb,transparent:true,opacity:.78,depthTest:false,depthWrite:false}));
+    lines.frustumCulled=false; lines.renderOrder=20; lines.name='collision-outlines'; scene.add(lines);
+    let last=-1;
+    G.tick.push(t=>{
+      if (t>=last && t-last<.06) return;
+      last=t;
+      const pos=G.camera.position;
+      const {vertices}=world.debugRender(undefined,c=>{
+        if (!obstaclesOnly(c)) return false;
+        const p=c.translation();
+        // Static mesh vertices for the exhibition are in world coordinates.
+        return c.shapeType()===R.ShapeType.TriMesh || Math.hypot(p.x-pos.x,p.y-pos.y,p.z-pos.z)<42;
+      });
+      let attribute=geometry.getAttribute('position');
+      if (!attribute || attribute.array.length<vertices.length) {
+        geometry.dispose();
+        attribute=new THREE.BufferAttribute(new Float32Array(Math.max(vertices.length,300)),3);
+        attribute.setUsage(THREE.DynamicDrawUsage); geometry.setAttribute('position',attribute);
+      }
+      attribute.array.set(vertices); attribute.needsUpdate=true; geometry.setDrawRange(0,vertices.length/3);
+    });
+  }
+
   // ---- what stands still: trunks and boulders, sorted into 90 m cells and only made solid near the focus ----
   function statics() { const put = (x, z, it) => { const k = tkey(Math.floor(x / 90), Math.floor(z / 90)); let c = cells.get(k); if (!c) cells.set(k, c = { x: (Math.floor(x / 90) + .5) * 90, z: (Math.floor(z / 90) + .5) * 90, items: [], cols: null }); c.items.push(it); };
-    if (Island.FOREST) for (const c of Island.FOREST.list) for (const L of c.t) for (const t of L) put(t[0], t[2], [0, t[0], t[1], t[2], .2 * t[4], 3.2 * t[5]]);
-    if (Island.ROCKS) for (const r of Island.ROCKS) put(r[0], r[2], [1, r[0], r[1], r[2], r[3], r[4]]); }
-  function cellOn(c) { c.cols = c.items.map(it => world.createCollider(it[0] === 0 ? R.ColliderDesc.cylinder(it[5], it[4]).setTranslation(it[1], it[2] + it[5], it[3]).setFriction(.6)
-    : R.ColliderDesc.ball(.86 * Math.cbrt(it[4] * it[4] * it[5] * .72)).setTranslation(it[1], it[2], it[3]).setFriction(.8))); }
+    for (const c of Island.FOREST.list) for (let sp=0;sp<c.t.length;sp++) for (const t of c.t[sp]) {
+      const [x,y,z,,width,h]=t, base=(sp ? 6.8 : 4.0)*h, total=19*h;
+      put(x,z,[0,x,y,z,.25*width,8*h]);
+      put(x,z,[2,x,y+(base+total)/2,z,(sp ? 2.7 : 3.3)*width,(total-base)/2]);
+    }
+    for (const r of Island.ROCKS) put(r[0],r[2],[1,...r]); }
+  function cellOn(c) {
+    c.cols = c.items.map(([kind,x,y,z,s,sy,yaw,hull]) => {
+      if (!kind) return world.createCollider(R.ColliderDesc.cylinder(sy,s).setTranslation(x,y+sy,z).setFriction(.6));
+      if (kind===2) return world.createCollider(R.ColliderDesc.cone(sy,s).setTranslation(x,y,z).setFriction(.55));
+      const points = Float32Array.from(hull,(v,i)=>v*(i%3===1 ? sy : s));
+      const shape = R.ColliderDesc.convexHull(points);
+      return world.createCollider(shape.setTranslation(x,y,z).setRotation({x:0,y:Math.sin(yaw/2),z:0,w:Math.cos(yaw/2)}).setFriction(.85));
+    });
+  }
   function cellOff(c) { for (const col of c.cols) world.removeCollider(col, false); c.cols = null; }
 
   // ---- the ground: one triangle mesh per 32 m tile, sampled from the same height function the eye and the wheels use ----
   function tileOn(kx, kz) { const k = tkey(kx, kz); if (tiles.has(k)) return; const n = TS + 1, v = new Float32Array(n * n * 3), ix = new Uint32Array(TS * TS * 6); let o = 0;
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const x = kx * TS + i, z = kz * TS + j; v[o++] = x; v[o++] = Island.surf(x, z)[0]; v[o++] = z; }
     o = 0; for (let j = 0; j < TS; j++) for (let i = 0; i < TS; i++) { const a = j * n + i, b = a + 1, c = a + n, d = c + 1; ix[o++] = a; ix[o++] = c; ix[o++] = b; ix[o++] = b; ix[o++] = c; ix[o++] = d; }
-    tiles.set(k, world.createCollider(R.ColliderDesc.trimesh(v, ix).setFriction(.9))); }
+    const collider = world.createCollider(R.ColliderDesc.trimesh(v, ix).setFriction(.9));
+    terrainHandles.add(collider.handle); tiles.set(k,collider); }
   function prime(x, z, rad = 1) { if (!ready) return; const kx = Math.floor(x / TS), kz = Math.floor(z / TS); for (let a = -rad; a <= rad; a++) for (let b = -rad; b <= rad; b++) tileOn(kx + a, kz + b); }
   function stream() { const kx = Math.floor(focus.x / TS), kz = Math.floor(focus.z / TS);
     if (!queue.length) for (let r = 0; r <= PC.tileRing; r++) for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) if (Math.max(Math.abs(a), Math.abs(b)) === r && !tiles.has(tkey(kx + a, kz + b))) queue.push([kx + a, kz + b]);
     if (queue.length) { const t = queue.shift(); if (Math.max(Math.abs(t[0] - kx), Math.abs(t[1] - kz)) <= PC.tileRing + 1) tileOn(t[0], t[1]); }
-    for (const [k, col] of tiles) { const s = k.split(','); if (Math.max(Math.abs(+s[0] - kx), Math.abs(+s[1] - kz)) > PC.tileRing + 2) { world.removeCollider(col, false); tiles.delete(k); } }
+    for (const [k, col] of tiles) { const s = k.split(','); if (Math.max(Math.abs(+s[0] - kx), Math.abs(+s[1] - kz)) > PC.tileRing + 2) { terrainHandles.delete(col.handle); world.removeCollider(col, false); tiles.delete(k); } }
     for (const c of cells.values()) { const d = Math.hypot(c.x - focus.x, c.z - focus.z); if (!c.cols && d < 150) cellOn(c); else if (c.cols && d > 230) cellOff(c); } }
 
   // ---- loose things ----
@@ -72,7 +115,86 @@ const Phys = (() => {
     thump(1); return n; }
   function thump(k) { const S = G.snd; if (!S || !S.ac || !S.out) return; const ac = S.ac, n = ac.sampleRate * .5 | 0, bf = ac.createBuffer(1, n, ac.sampleRate), d = bf.getChannelData(0); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);
     const s = ac.createBufferSource(), lp = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = bf; lp.type = 'lowpass'; lp.frequency.value = 160 + 500 * k; g.gain.value = Math.min(.5, .3 * k); s.connect(lp); lp.connect(g); g.connect(S.out); s.start(); }
-  function ray(o, d, max = 200) { if (!ready) return null; const hit = world.castRay(new R.Ray(o, d), max, true); if (!hit) return null; const t = hit.timeOfImpact !== undefined ? hit.timeOfImpact : hit.toi; return { t, x: o.x + d.x * t, y: o.y + d.y * t, z: o.z + d.z * t }; }
+  function ray(o, d, max = 200, solids = false) {
+    if (!ready) return null;
+    const hit = world.castRay(new R.Ray(o,d),max,true,undefined,undefined,undefined,playerBody || undefined,solids ? obstaclesOnly : undefined);
+    if (!hit) return null;
+    const t=hit.timeOfImpact; return {t,x:o.x+d.x*t,y:o.y+d.y*t,z:o.z+d.z*t};
+  }
+  function box(center,size,yaw=0) {
+    if (!ready) return () => {};
+    const q={x:0,y:Math.sin(yaw/2),z:0,w:Math.cos(yaw/2)};
+    const col=world.createCollider(R.ColliderDesc.cuboid(size.x/2,size.y/2,size.z/2)
+      .setRotation(q).setTranslation(center.x,center.y,center.z).setFriction(.75));
+    return () => { if (col.isValid()) world.removeCollider(col,true); };
+  }
+  function meshSolid(root) {
+    if (!ready) return () => {};
+    const cols=[], vertices=[], triangles=[], p=new THREE.Vector3();
+    root.updateWorldMatrix(true,true);
+    root.traverse(mesh=>{
+      if (!mesh.isMesh || mesh.isSkinnedMesh) return;
+      const g=mesh.geometry, pos=g.attributes.position, offset=vertices.length/3;
+      for (let i=0;i<pos.count;i++) {
+        p.fromBufferAttribute(pos,i).applyMatrix4(mesh.matrixWorld);
+        vertices.push(p.x,p.y,p.z);
+      }
+      if (g.index) for (const i of g.index.array) triangles.push(offset+i);
+      else for (let i=0;i<pos.count;i++) triangles.push(offset+i);
+    });
+    if (triangles.length) cols.push(world.createCollider(R.ColliderDesc.trimesh(new Float32Array(vertices),new Uint32Array(triangles)).setFriction(.7)));
+    return () => { for (const c of cols) if (c.isValid()) world.removeCollider(c,true); };
+  }
+  function stopPlayer() {
+    if (playerBody) world.removeRigidBody(playerBody);
+    playerBody=playerCollider=null; playerHeight=playerRadius=0;
+  }
+  function setPlayer(feet,height,radius) {
+    if (!ready) return;
+    if (!playerBody) {
+      playerBody=world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(feet.x,feet.y,feet.z));
+      playerCollider=world.createCollider(R.ColliderDesc.capsule(height/2-radius,radius)
+        .setTranslation(0,height/2,0).setFriction(.25),playerBody);
+      playerHeight=height; playerRadius=radius;
+    } else if (height!==playerHeight || radius!==playerRadius) {
+      playerCollider.setShape(new R.Capsule(height/2-radius,radius));
+      playerCollider.setTranslationWrtParent({x:0,y:height/2,z:0});
+      playerHeight=height; playerRadius=radius;
+    }
+    playerBody.setNextKinematicTranslation(feet);
+  }
+  function setCompanion(feet,lift=0) {
+    if (!ready) return;
+    if (!feet) {
+      if (companionBody) world.removeRigidBody(companionBody);
+      companionBody=null; return;
+    }
+    const p={x:feet.x,y:feet.y+lift,z:feet.z};
+    if (!companionBody) {
+      companionBody=world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x,p.y,p.z));
+      world.createCollider(R.ColliderDesc.capsule(.09,.17).setTranslation(0,.27,0),companionBody);
+    }
+    companionBody.setNextKinematicTranslation(p);
+  }
+  function sweep(pos,rot,displacement,shape,exclude=playerBody) {
+    const hit=world.castShape(pos,rot,displacement,shape,.003,1,false,undefined,undefined,undefined,exclude || undefined,obstaclesOnly);
+    return hit && {t:hit.time_of_impact,normal:hit.normal1};
+  }
+  function castBox(center,half,rotation,displacement) {
+    if (!ready) return null;
+    return sweep(center,rotation,displacement,new R.Cuboid(half.x,half.y,half.z));
+  }
+  function castPlayer(feet,height,radius,displacement,companion=false) {
+    if (!ready) return null;
+    const skin=.018, center={x:feet.x,y:feet.y+height/2+skin,z:feet.z};
+    return sweep(center,idRotation,displacement,new R.Capsule(height/2-radius-skin,radius),companion ? companionBody : playerBody);
+  }
+  function headroom(feet,height,radius) {
+    if (!ready) return true;
+    // Check the crown at the top of the proposed standing capsule, clear of the floor.
+    const expansion=height*.31, center={x:feet.x,y:feet.y+height-radius-expansion/2,z:feet.z};
+    return !world.intersectionWithShape(center,idRotation,new R.Capsule(expansion/2,radius),undefined,undefined,undefined,playerBody || undefined,obstaclesOnly);
+  }
 
   // ---- one frame: stream the solid world to the focus, then as many fixed steps as the frame's time holds ----
   function step(dt) { if (!ready) return; const car = G.drive && typeof Drive !== 'undefined' ? Drive.car : null; focus.copy(car ? car.p : G.camera.position); stream();
@@ -91,6 +213,7 @@ const Phys = (() => {
     else { const h = ray(a.o, a.d, 160); if (h) blast(h.x, h.y + .3, h.z); else blast(a.o.x + a.d.x * 20, a.o.y + a.d.y * 20, a.o.z + a.d.z * 20); } });
 
   return { init, step, spawn, adopt, blast, ray, prime, thump, pre, KIND, bodies, wind, H, SEA,
+    box,meshSolid,castBox,castPlayer,headroom,setPlayer,stopPlayer,setCompanion,
     get ready() { return ready; }, get R() { return R; }, get world() { return world; }, get hold() { return hold; }, set hold(v) { hold = v; },
     get stats() { return { bodies: bodies.length, awake: bodies.filter(e => e.on && !e.b.isSleeping()).length, tiles: tiles.size, cells: [...cells.values()].filter(c => c.cols).length, steps, stepMs: +stepMs.toFixed(2) }; } };
 })();

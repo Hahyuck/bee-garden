@@ -22,7 +22,11 @@
     "license": "MIT",
     "licenseUrl": "https://github.com/madjin/vrchat-room-tutorial/blob/870b99834208ec928d16a83079020037624f3276/LICENSE",
     "file": "rikeri-multiroom.glb",
-    "height": 6.18
+    "height": 6.18,
+    "walkEntrance": {
+      "edge": "east",
+      "across": 0.76
+    }
   },
   {
     "id": "suburban-house",
