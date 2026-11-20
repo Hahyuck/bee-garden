@@ -38,13 +38,15 @@ const Modes = (() => {
     if (k !== shMode) { shMode = k; sc.left = sc.bottom = -p[0]; sc.right = sc.top = p[0]; sc.near = p[2]; sc.far = p[3]; sc.updateProjectionMatrix(); sun.shadow.bias = p[4]; sun.shadow.normalBias = p[5]; }
     const ts = 2 * p[0] / sun.shadow.mapSize.x, cp = camera.position; c.set(0, 0, 0).addScaledVector(SR, Math.round(cp.dot(SR) / ts) * ts).addScaledVector(SU, Math.round(cp.dot(SU) / ts) * ts).addScaledVector(S, cp.dot(S));
     sun.target.position.copy(c); sun.position.copy(c).addScaledVector(S, p[1]); sun.target.updateMatrixWorld(); sun.updateMatrixWorld(); }
-  function step(camera, dt) { if (!booted) { booted = true; MODES[cur].enter(); }
+  // add(id, mode, keyCode, keyLabel): a module brings its own mode, e.g. Modes.add('collect', {...}, 'Digit0', '0')
+  const extra = {}; function add(id, mode, code, label) { MODES[id] = mode; if (code) { extra[code] = id; mode.key = label || code; } }
+  function step(camera, dt) { if (!booted) { booted = true; const want = Q.get('mode'); if (MODES[want]) cur = want; MODES[cur].enter(); }
     camera.near = .3; Post.lens.aperture = 0; let line;
     const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); camera.fov = fix[6] || CC.fov; camera.near = fix[7] || .3; line = ''; }
     else line = MODES[cur].step(camera, dt);
     const high = camera.position.y - Math.max(Island.surf(camera.position.x, camera.position.z)[0], 0); shadows(camera, cur === 'bee' && !fix ? 2 : high > 45 ? 0 : 1);
-    if (performance.now() - hudAt > 250) { hudAt = performance.now(); hud.textContent = Object.keys(MODES).map((k, i) => (k === cur ? '▸' : ' ') + (i + 1) + ' ' + MODES[k].name).join('   ') + '\n' + line; } }
-  addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); const i = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code); if (i >= 0) set(Object.keys(MODES)[i]); if (cur === 'hike' && e.code.startsWith('Arrow')) e.preventDefault(); });
+    if (performance.now() - hudAt > 250) { hudAt = performance.now(); hud.textContent = Object.keys(MODES).map((k, i) => (k === cur ? '▸' : ' ') + (MODES[k].key || i + 1) + ' ' + MODES[k].name).join('   ') + '\n' + line; } }
+  addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); const i = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code); if (i >= 0) set(Object.keys(MODES)[i]); else if (extra[e.code]) set(extra[e.code]); if (cur === 'hike' && e.code.startsWith('Arrow')) e.preventDefault(); });
   addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
-  return { step, set, MODES, fly, get cur() { return cur; } };
+  return { step, set, add, MODES, fly, keys, get cur() { return cur; } };
 })();

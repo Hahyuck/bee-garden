@@ -1468,15 +1468,39 @@ const Modes = (() => {
     if (k !== shMode) { shMode = k; sc.left = sc.bottom = -p[0]; sc.right = sc.top = p[0]; sc.near = p[2]; sc.far = p[3]; sc.updateProjectionMatrix(); sun.shadow.bias = p[4]; sun.shadow.normalBias = p[5]; }
     const ts = 2 * p[0] / sun.shadow.mapSize.x, cp = camera.position; c.set(0, 0, 0).addScaledVector(SR, Math.round(cp.dot(SR) / ts) * ts).addScaledVector(SU, Math.round(cp.dot(SU) / ts) * ts).addScaledVector(S, cp.dot(S));
     sun.target.position.copy(c); sun.position.copy(c).addScaledVector(S, p[1]); sun.target.updateMatrixWorld(); sun.updateMatrixWorld(); }
-  function step(camera, dt) { if (!booted) { booted = true; MODES[cur].enter(); }
+  // add(id, mode, keyCode, keyLabel): a module brings its own mode, e.g. Modes.add('collect', {...}, 'Digit0', '0')
+  const extra = {}; function add(id, mode, code, label) { MODES[id] = mode; if (code) { extra[code] = id; mode.key = label || code; } }
+  function step(camera, dt) { if (!booted) { booted = true; const want = Q.get('mode'); if (MODES[want]) cur = want; MODES[cur].enter(); }
     camera.near = .3; Post.lens.aperture = 0; let line;
     const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); camera.fov = fix[6] || CC.fov; camera.near = fix[7] || .3; line = ''; }
     else line = MODES[cur].step(camera, dt);
     const high = camera.position.y - Math.max(Island.surf(camera.position.x, camera.position.z)[0], 0); shadows(camera, cur === 'bee' && !fix ? 2 : high > 45 ? 0 : 1);
-    if (performance.now() - hudAt > 250) { hudAt = performance.now(); hud.textContent = Object.keys(MODES).map((k, i) => (k === cur ? '▸' : ' ') + (i + 1) + ' ' + MODES[k].name).join('   ') + '\n' + line; } }
-  addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); const i = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code); if (i >= 0) set(Object.keys(MODES)[i]); if (cur === 'hike' && e.code.startsWith('Arrow')) e.preventDefault(); });
+    if (performance.now() - hudAt > 250) { hudAt = performance.now(); hud.textContent = Object.keys(MODES).map((k, i) => (k === cur ? '▸' : ' ') + (MODES[k].key || i + 1) + ' ' + MODES[k].name).join('   ') + '\n' + line; } }
+  addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); const i = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code); if (i >= 0) set(Object.keys(MODES)[i]); else if (extra[e.code]) set(extra[e.code]); if (cur === 'hike' && e.code.startsWith('Arrow')) e.preventDefault(); });
   addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
-  return { step, set, MODES, fly, get cur() { return cur; } };
+  return { step, set, add, MODES, fly, keys, get cur() { return cur; } };
+})();
+
+// ===== 89_example_collect.js =====
+
+// ---- an example of a game made on the engine, kept small on purpose: "gather the barrels". Press 0.
+//      Ten yellow barrels are set down around you; fly into one to take it; the clock runs for sixty seconds.
+//      It shows the four things a game needs from the engine: a mode of its own, things placed in the physics world,
+//      a rule checked every frame, and a line of readout. Copy this file to start a game of your own. ----
+const Collect = (() => {
+  const N = 10, TIME = 60; let items = [], score = 0, left = 0, best = 0;
+  function enter() { score = 0; left = TIME; const p = Modes.fly.p;
+    for (const e of items) if (!e.got) e.b.setTranslation({ x: 0, y: -100, z: 0 }, true);       // clear what the last round left (far below, the physics puts a body to rest)
+    items = []; for (let i = 0; i < N; i++) { const a = i / N * TAU, r = 14 + 22 * Math.random(), x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+      Phys.prime(x, z, 0);                                                                       // make the ground solid there before something lands on it
+      const e = Phys.spawn('barrel', x, Math.max(Island.surf(x, z)[0], 0) + 1.5, z, { color: 0xffd040 }); if (e) items.push(e); } }
+  function step(camera, dt) { Modes.MODES.free.step(camera, dt);                                 // move like free flight
+    if (left > 0) { left -= dt; for (const e of items) { if (e.got) continue; const q = e.b.translation();
+        if (camera.position.distanceTo(q) < 2.6) { e.got = true; score++; FX.blast(q.x, q.y, q.z, 3); Phys.thump(.4); e.b.setTranslation({ x: q.x, y: -100, z: q.z }, true); } }
+      if (score === items.length || left <= 0) { best = Math.max(best, score); left = 0; } }
+    return left > 0 ? `통 모으기 ${score} / ${items.length} · 남은 시간 ${left.toFixed(0)}초` : `끝! ${score}개 · 최고 ${best}개 · 0 을 다시 누르면 새 판`; }
+  Modes.add('collect', { name: '통 모으기', enter, leave() {}, step }, 'Digit0', '0');
+  return { get score() { return score; }, get items() { return items; } };
 })();
 
 // ===== 90_main.js =====
