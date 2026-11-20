@@ -75,7 +75,7 @@ function renderResult() {
   $('result-subtitle').textContent = finished ? '세 바퀴의 승부가 끝났습니다.' : '시간이 다 됐습니다. 체크포인트에서 시간을 더 얻으세요.';
   $('result-position').textContent = String(race.position).padStart(2,'0');
   $('result-time').textContent = clock(resultTime); $('result-best').textContent = bestFor(mode) ? clock(bestFor(mode)) : '—';
-  $('result-tip').textContent = finished ? '라이벌 뒤를 따라가면 슬립스트림으로 더 빠르게 가속합니다.' : '코너에서는 가속을 잠시 놓고 오른쪽으로 조향하세요. 입문 난이도는 시간이 더 넉넉합니다.';
+  $('result-tip').textContent = finished ? '라이벌 뒤를 따라가면 슬립스트림으로 더 빠르게 가속합니다.' : '코너에서는 가속을 잠시 놓고 커브 안쪽으로 조향하세요. 입문 난이도는 시간이 더 넉넉합니다.';
 }
 function input() {
   const controls = new Set(touches.values());
@@ -86,7 +86,7 @@ function input() {
   const pad = navigator.getGamepads?.()?.find(p => p?.connected);
   if (pad) {
     if (Math.abs(pad.axes[0] || 0) > .14) steer = pad.axes[0];
-    steer += Number(pad.buttons[15]?.pressed) - Number(pad.buttons[14]?.pressed);
+    steer += Number(!!pad.buttons[15]?.pressed) - Number(!!pad.buttons[14]?.pressed);
     throttle = Math.max(throttle, pad.buttons[7]?.value || 0, pad.buttons[0]?.pressed ? 1 : 0);
     brake = Math.max(brake, pad.buttons[6]?.value || 0, pad.buttons[1]?.pressed ? 1 : 0);
     drift ||= !!pad.buttons[2]?.pressed;
@@ -95,7 +95,9 @@ function input() {
     if (now.camera && !gamepadPrevious.camera) switchCamera(); gamepadPrevious = now;
   } else gamepadPrevious = {};
   if (race.phase !== 'racing') return {throttle:0,brake:0,steer:0,drift:false};
-  return {throttle,brake,steer:Math.max(-1,Math.min(1,steer)),drift};
+  // Positive track lateral points to the infield, on the driver's left.
+  const trackSteer = -Math.max(-1, Math.min(1, steer));
+  return {throttle, brake, steer: trackSteer, drift};
 }
 function paintMap(canvas, active) {
   const ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
