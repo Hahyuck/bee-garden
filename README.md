@@ -43,3 +43,7 @@
 ## 출처
 
 [awesome-fable-5.2 / cat-garden](https://github.com/BubbleBrainBB/awesome-fable-5.2/tree/main/cat-garden)(고양이의 눈으로 본 식물원, 오프라인 패스 트레이싱 영상)의 구상을 벌의 시점으로 바꿔, 브라우저 실시간 버전으로 새로 만든 것입니다. 산행은 같은 저장소의 [mountain-hike](https://github.com/BubbleBrainBB/awesome-fable-5.2/tree/main/mountain-hike)를 같은 방식으로 새로 만든 것입니다. 코드는 Claude(Claude Code)가 작성했습니다.
+
+## garden engine
+
+[engine/](engine/)은 벌의 정원의 표현 방식을 기준으로 세운 독립 엔진입니다. 하늘·바다·빛·필름·날씨·물리·차가 모두 직접 쓴 모듈이고, 소스를 고쳐 가며 쓸 수 있게 나뉘어 있습니다. 보기: https://hahyuck.github.io/bee-garden/engine/ · 설명: [engine/README.md](engine/README.md)

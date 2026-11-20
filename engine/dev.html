@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>garden engine</title>
+<style>
+html,body{margin:0;height:100%;background:#0b0d0c;overflow:hidden}
+canvas{display:block;width:100vw;height:100vh;touch-action:none}
+#load{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0b0d0c;color:#f3e6d2;font:600 14px/1.6 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;z-index:10;transition:opacity .6s}
+#load h1{font-size:26px;margin:0;letter-spacing:.02em}
+#load p{margin:0;opacity:.7;font-weight:500;text-align:center}
+#track{width:min(360px,70vw);height:3px;background:rgba(243,230,210,.16);border-radius:2px;overflow:hidden}
+#bar{height:100%;width:0;background:#e8b54a;transition:width .2s}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="load"><h1>garden engine</h1><div id="track"><div id="bar"></div></div><div id="what">준비</div>
+<p>1 자유 · 2 벌 · 3 산행 · 4 운전<br>5 맑음 · 6 비 · 7 눈 · 8 혹한 · 9 자동 날씨<br>[ ] 시각 · T 시간 멈춤 · F 돌 · G 상자 · X 폭발 · M 소리</p></div>
+
+<script>
+import('./vendor/three.module.min.js').then(async T => { window.THREE = T; for (const f of ['00_core.js', '02_config.js', '10_sky.js', '12_sea.js', '40_fxkit.js', '41_weather.js', '42_island.js', '44_garden.js', '80_post.js', '85_phys.js', '86_audio.js', '87_drive.js', '88_modes.js', '90_main.js']) await new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'src/' + f + '?' + Date.now(); s.onload = ok; s.onerror = () => no(new Error('could not load ' + f)); document.head.appendChild(s); }); });
+</script></body></html>
