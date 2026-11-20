@@ -3,7 +3,7 @@
 //      ice, wetness. Snow builds up on what faces the sky and melts when it warms; wet ground freezes; the wind carries rain and
 //      flakes and pushes loose bodies (Phys); tyres lose their grip (Drive); the sky darkens and the air thickens (Sky); and the
 //      ground's colour feeds the light that bounces off it. Every patched material gets uWx = (snow cover, ice, wetness, wind 0..1)
-//      and may call wxCover(). Keys 5-9 choose the weather. ----
+//      and may call wxCover(). K/I/N/8/9 choose the weather. ----
 const GLSL_WX = /* glsl */`
 #ifndef CL_WX
 #define CL_WX
@@ -51,6 +51,6 @@ const Weather = (() => {
       _a.setRGB(C.albedoGround[0], C.albedoGround[1], C.albedoGround[2]).lerp(_b.setRGB(C.albedoSnow[0], C.albedoSnow[1], C.albedoSnow[2]), S.cover); G.hemi.groundColor.r += G.sun.color.r * _a.r * k; G.hemi.groundColor.g += G.sun.color.g * _a.g * k; G.hemi.groundColor.b += G.sun.color.b * _a.b * k; }
     chipT -= dt; if (chipT <= 0) { chipT = .25; const h = Math.floor(G.day), mi = Math.floor((G.day - h) * 60); chip.textContent = `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')} · 날씨 ${NAME[S.mode]} · ${S.temp.toFixed(0)}°C · 바람 ${S.speed.toFixed(0)} m/s` + (S.rain > .05 ? ' · 비' : '') + (S.snowing > .05 ? ' · 눈' : '') + (S.cover > .01 ? ` · 적설 ${Math.round(S.cover * 100)}%` : '') + (S.ice > .01 ? ` · 빙결 ${Math.round(S.ice * 100)}%` : ''); } }
 
-  addEventListener('keydown', e => { if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return; const m = { KeyK: 'clear', Digit6: 'rain', Digit7: 'snow', Digit8: 'frost', Digit9: 'auto' }[e.code]; if (m) { set(m); chipT = 0; } });
+  addEventListener('keydown', e => { if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return; const m = { KeyK: 'clear', KeyI: 'rain', KeyN: 'snow', Digit8: 'frost', Digit9: 'auto' }[e.code]; if (m) { set(m); chipT = 0; } });
   return { build, set, S, NAME };
 })();

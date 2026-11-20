@@ -27,7 +27,7 @@ vec3 seaWave(vec2 p, float far, float calm){      // xy: slope, z: height
     for (let i = 0; i < R.length - 1; i++) for (let j = 0; j < seg; j++) { const a = i * seg + j, b = i * seg + (j + 1) % seg, c = a + seg, d = b + seg; idx.push(a, b, c, b, d, c); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(idx);
     U = { ...Sky.U, ...G.U, uTime: G.uTime, uWx: G.uWx, uAt: { value: new THREE.Vector3() }, uShore: { value: null }, uShoreF: { value: new THREE.Vector4(0, 0, 1, 0) } };
-    mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ uniforms: U, fog: false, transparent: true,
+    mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ uniforms: U, fog: false, transparent: true,side:THREE.DoubleSide,forceSinglePass:true,
       vertexShader: WAVES + `uniform vec3 uAt; varying vec3 vW; varying float vFar;
         void main(){ vec3 p = position + uAt; vFar = 1. - smoothstep(50., 380., length(position.xz)); float calm = smoothstep(.05, 3., -seaBed(p.xz));
           vec3 w = seaWave(p.xz, vFar, calm); p.y = ${f3(C.level)} + w.z; vW = p; gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.); }`,
@@ -39,6 +39,14 @@ vec3 seaWave(vec2 p, float far, float calm){      // xy: slope, z: height
           // the surface: the swell's own slope, plus ripples the mesh cannot carry
           float e = .25, n0 = ripF(q); vec2 rip = vec2(ripF(q + vec2(e, 0.)) - n0, ripF(q + vec2(0., e)) - n0) / e * (.05 + .17 * uWx.w) * dn * (.35 + .65 * calm) * open;
           vec3 N = normalize(vec3(-w.x - rip.x, 1., -w.y - rip.y)), V = normalize(cameraPosition - vW), L = uSunDir;
+          if(!gl_FrontFacing){
+            if(cameraPosition.y>-.12)discard;
+            float windowLight=smoothstep(.53,.82,-V.y);
+            vec3 refracted=normalize(vec3(-V.x*.67,max(.04,-V.y)+N.x*.23,-V.z*.67));
+            vec3 underside=mix(vec3(.035,.19,.20),skyCol(refracted,0.)*.72,windowLight);
+            underside+=vec3(.045,.10,.085)*smoothstep(.0,.20,N.z+.07);
+            gl_FragColor=vec4(underside,1.);return;
+          }
           float nv = max(dot(N, V), 0.), fr = .02 + .98 * pow(1. - nv, 5.); vec3 Rf = reflect(-V, N); Rf.y = abs(Rf.y) + .02; Rf = normalize(Rf);
           // what is under it: the sand through shallow water (red is lost first, then green), and the water's own colour where it is deep
           vec3 light = uHor * .5 + uSunK * (.18 + .3 * max(L.y, 0.));
@@ -60,5 +68,14 @@ vec3 seaWave(vec2 p, float far, float calm){      // xy: slope, z: height
           gl_FragColor = vec4(clAir(col, vW), smoothstep(0., .07, depth)); }` }));
     mesh.frustumCulled = false; mesh.renderOrder = 5; scene.add(mesh);
     G.tick.push(() => { const c = G.camera.position; U.uAt.value.set(Math.round(c.x), 0, Math.round(c.z)); }); }
-  return { build, bake };
+  const trains=[[.8,.6,61,1],[.55,.83,37,.62],[.97,.24,23,.4],[.3,.95,13,.24],[.9,-.4,7.3,.14],[.6,.8,4.1,.08]];
+  function height(x,z){
+    const weather=G.uWx.value,amp=(C.swell+C.windSwell*weather.w)*(1-weather.y);
+    let wave=0;
+    for(const [dx,dz,length,weight] of trains){
+      const k=TAU/length;wave+=weight*Math.sin((x*dx+z*dz)/Math.hypot(dx,dz)*k+G.t*Math.sqrt(9.81*k)*.8);
+    }
+    return C.level+amp*wave*sm(.05,3,C.level-Island.surf(x,z)[0]);
+  }
+  return { build, bake, height };
 })();

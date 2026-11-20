@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "description": "정원에서 캐릭터를 조종해 탐사 무전기를 찾는 2.5D 장면",
+  "mode": "actors",
+  "style": "diorama",
+  "character": "garden-pilot",
+  "assets": [
+    { "id": "garden-pilot", "name": "정원 탐험가", "role": "character", "height": 1.7, "path": "assets/actors/kate.glb" },
+    { "id": "garden-radio", "name": "탐사 무전기", "role": "prop", "height": 0.6, "x": -235, "z": -279, "path": "assets/samples/world/sacc-walkie.glb" }
+  ]
+}

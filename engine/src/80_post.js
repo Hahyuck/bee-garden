@@ -31,6 +31,7 @@ void main(){ vec3 c = vec3(0.); for (int i = 0; i < 4; i++) { vec2 o = vec2(floa
 void main(){ vec3 c = texture2D(tC, vUv).rgb * .227; c += (texture2D(tC, vUv + uDir * 1.385).rgb + texture2D(tC, vUv - uDir * 1.385).rgb) * .316;
   c += (texture2D(tC, vUv + uDir * 3.231).rgb + texture2D(tC, vUv - uDir * 3.231).rgb) * .0703; gl_FragColor = vec4(c, 1.); }`;
   const FINAL = /* glsl */`varying vec2 vUv; uniform sampler2D tC, tB1, tB2, tD; uniform float uExp, uTime, uAspect, uVig, uGrain, uBloom, uShafts, uFringe, uFilm, uEye; uniform vec2 uRes;
+uniform vec3 uWaterClip;
 vec3 hexg(vec2 p){ const vec2 s = vec2(1., 1.7320508); vec4 hC = floor(vec4(p, p - vec2(.5, 1.)) / s.xyxy) + .5; vec4 h = vec4(p - hC.xy * s, p - (hC.zw + .5) * s); vec2 c = dot(h.xy, h.xy) < dot(h.zw, h.zw) ? hC.xy * s : (hC.zw + .5) * s; vec2 l = abs(p - c); return vec3(c, .5 - max(dot(l, s * .5), l.x)); } uniform vec2 uSunScr; uniform vec3 uShaftCol, uHeat[2];
 float hash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), 0., 1.); }
@@ -48,7 +49,15 @@ void main(){ vec2 uv = vUv;
     col += uShaftCol * tr / 14. * uShafts * exp(-length(toSun * vec2(uAspect, 1.)) * 2.5); }
   // a bee sees no red but does see ultraviolet: green goes to red, blue to green, and what is bright and pale stands in for UV in blue
   { float uvl = (dot(col, vec3(.2)) + .4 * max(col.r, max(col.g, col.b))) * .75; col = mix(col, vec3(col.g * 1.05, col.b, uvl), uEye); col *= 1. - smoothstep(.1, .02, hx.z) * .6 * uEye; }
-  vec3 plain = clamp(col, 0., 1.);                                    // without the film: the light as it is, cut off at white
+  if(uWaterClip.x>.01){
+    float d=texture2D(tD,uv).r, near=uWaterClip.y, far=uWaterClip.z;
+    float meters=near*far/max(.001,far-d*(far-near));
+    vec3 trans=exp(-min(meters,90.)*vec3(.094,.043,.035));
+    float light=exp(-uWaterClip.x*.057);
+    vec3 haze=vec3(.025,.22,.24)*light*(.72+.35*uv.y);
+    col=mix(col,col*trans+haze*(1.-trans),smoothstep(.02,.5,uWaterClip.x));
+  }
+  vec3 plain = clamp(col, 0., 1.);
   col *= 1. - uVig * pow(r, 2.6); col = aces(col * 1.05); float l = dot(col, vec3(.2126, .7152, .0722)); col = mix(vec3(l), col, 1.1); col = mix(plain, col, uFilm);
   col = pow(max(col, 0.), vec3(1. / 2.2)); col += (hash12(gl_FragCoord.xy + fract(uTime * 3.17) * 517.) - .5) * uGrain * uFilm; gl_FragColor = vec4(col, 1.); }`;
   const heatP = [{ p: new THREE.Vector3(), k: 0 }, { p: new THREE.Vector3(), k: 0 }], _s = new THREE.Vector3();
@@ -103,10 +112,12 @@ void main(){ vec2 uv = vUv;
     const bl = (from, to, x, y) => { M.blur.uniforms.tC.value = from.texture; M.blur.uniforms.uDir.value.set(x, y); pass(M.blur, to); };
     bl(b1a, b1b, 1 / b1a.width, 0); bl(b1b, b1a, 0, 1 / b1a.height); bl(b1a, b2b, 1 / b2a.width, 0); bl(b2b, b2a, 0, 1 / b2a.height);
     const f = M.fin.uniforms; f.tC.value = src.texture; f.tB1.value = b1a.texture; f.tB2.value = b2a.texture; f.uExp.value = exp; f.uAspect.value = W / H; f.tD.value = rtMain.depthTexture; f.uEye.value = lens.eye; f.uRes.value.set(W, H); f.uBloom.value = G.look.bloom ? C.bloom : 0; f.uFilm.value = G.look.film ? 1 : 0;
+    f.uWaterClip ??= {value:new THREE.Vector3()};
+    f.uWaterClip.value.set(Modes.cur==='sub'?Math.max(0,CFG.sea.level-camera.position.y):0,camera.near,camera.far);
     // where the sun is on the screen, and whether its shafts can be seen: low sun, in front of the lens, not behind a storm
     { const sd = Sky.sunDir, st = typeof Weather !== 'undefined' ? Weather.S.storm : 0; _s.copy(camera.position).addScaledVector(sd, 1000).project(camera); const front = _s.z < 1 && Math.abs(_s.x) < 1.6 && Math.abs(_s.y) < 1.6;
       f.uShafts.value = front && G.look.shafts ? C.shafts * sm(-.03, .08, sd.y) * (1 - sm(.35, .8, sd.y)) * (1 - st) * (lens.aperture > 0 ? 0 : 1) : 0; f.uSunScr.value.set(_s.x * .5 + .5, _s.y * .5 + .5); f.uShaftCol.value.copy(Sky.U.uSkyK.value).multiplyScalar(1.4); }
     heatP.forEach((h, i) => { h.k = Math.max(0, h.k - (dt || .016) * .7); _s.copy(h.p).project(camera); f.uHeat.value[i].set(_s.x * .5 + .5, _s.y * .5 + .5, _s.z < 1 ? h.k * clamp(18 / Math.max(camera.position.distanceTo(h.p), 4)) : 0); });
-    pass(M.fin, null); }
+    const output=VisualStyle.output(W,H,rtMain.depthTexture,camera.near,camera.far);pass(M.fin,output);if(output)VisualStyle.present(R); }
   return { build, render, lens, heat, fisheyeFov };
 })();

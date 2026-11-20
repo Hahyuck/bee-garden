@@ -10,6 +10,7 @@ const DriveRace = (() => {
   let phase = 'none', t = 0, elapsed = 0, best = 0, nextGate = 0, previousIndex = 0;
   let handoffYaw = 0, arch = null, promptDistance = Infinity, messageAt = -1;
   let releaseParked = null, releaseGate = [];
+  let doorOpen=false, doorAngle=0, boardingStart=0, releaseDoor=null, colliderAngle=-1;
   try { best = Math.max(0, Number(localStorage.getItem('garden.coast-time-trial')) || 0); } catch {}
   const touch = matchMedia('(any-pointer: coarse)');
   const ui = document.createElement('div');
@@ -18,10 +19,11 @@ const DriveRace = (() => {
     <div id="race-rear-mirror" aria-label="후방 거울"></div>
     <div id="race-time" role="timer"></div>
     <button type="button" id="race-board"></button>
+    <button type="button" id="race-door" hidden>문 열기 (O)</button>
     <div id="race-result" role="status"></div>
     <div id="race-touch" aria-label="운전 조작">
       <div><button type="button" data-pedal="left" aria-label="좌회전">◀</button><button type="button" data-pedal="right" aria-label="우회전">▶</button></div>
-      <div><button type="button" data-pedal="hb">드리프트</button><button type="button" data-pedal="brk">제동</button><button type="button" data-pedal="acc">가속</button></div>
+      <div><button type="button" data-pedal="hb">브레이크</button><button type="button" data-pedal="brk">제동/후진</button><button type="button" data-pedal="acc">가속</button></div>
     </div>`;
   document.body.append(ui);
   const css = document.createElement('style');
@@ -34,6 +36,8 @@ const DriveRace = (() => {
     #drive-race #race-board {background:#edc476;color:#272011;border:0;white-space:nowrap;padding:9px 16px}
     #drive-race #race-board:disabled {background:#181d19df;color:#fff3dd;cursor:default}
     #race-result {bottom:48%;background:#171d1ceb;padding:10px 15px;border-radius:8px;font-size:17px}
+    #race-door {position:fixed;left:50%;bottom:calc(18% + 49px);transform:translateX(-50%);z-index:6}
+    @media(max-width:540px){#race-door{bottom:calc(25% + 49px)}}
     #race-touch {position:fixed;inset:auto 14px calc(75px + env(safe-area-inset-bottom)) 14px;z-index:5;display:flex;justify-content:space-between;align-items:flex-end;pointer-events:none}
     #race-touch div {display:flex;gap:4px}
     #race-touch button {pointer-events:auto;min-width:44px}
@@ -46,6 +50,22 @@ const DriveRace = (() => {
   const mirror = ui.querySelector('#race-rear-mirror'), timing = ui.querySelector('#race-time');
   const board = ui.querySelector('#race-board'), message = ui.querySelector('#race-result'), pads = ui.querySelector('#race-touch');
   const held = new Map();
+  const doorButton=ui.querySelector('#race-door');
+  function toggleDoor() {
+    if(phase==='approach' && promptDistance<=1.5)doorOpen=!doorOpen;
+  }
+  doorButton.addEventListener('click',()=>{toggleDoor();doorButton.blur();});
+  function updateDoor(open) {
+    doorAngle=open;Drive.setDoor(open);
+    if(Math.abs(colliderAngle-open)<.07 && open>0 && open<1)return;
+    if(colliderAngle===open)return;
+    releaseDoor?.();releaseDoor=null;colliderAngle=open;
+    if(phase==='approach' && open>.04){
+      const a=1.39*open;
+      const center=vehiclePoint(eye,.815+.47*Math.sin(a),.22,.57-.47*Math.cos(a));
+      releaseDoor=Phys.box(center,new THREE.Vector3(.09,.86,.95),carYaw()-a);
+    }
+  }
   function readPedals() {
     const down = key => [...held.values()].includes(key);
     Object.assign(Drive.touch, {acc:+down('acc'), brk:+down('brk'), hb:+down('hb'), st:+down('left')-Number(down('right'))});
@@ -69,6 +89,7 @@ const DriveRace = (() => {
     ui.hidden = phase === 'none'; mirror.hidden = !inCar; timing.hidden = !racing;
     pads.hidden = !(inCar && (navigator.maxTouchPoints || touch.matches));
     board.hidden = phase !== 'approach' && phase !== 'finished';
+    doorButton.hidden = phase!=='approach' || promptDistance>1.5;
     message.hidden = !(phase === 'finished' || phase === 'grid');
   }
   touch.addEventListener('change',visibility);
@@ -91,6 +112,7 @@ const DriveRace = (() => {
     if(arch) arch.visible=false;
   }
   function unpark() {
+    releaseDoor?.();releaseDoor=null;colliderAngle=-1;
     if(releaseParked) releaseParked();
     releaseParked=null;
   }
@@ -107,6 +129,7 @@ const DriveRace = (() => {
     }
   }
   function startApproach() {
+    doorOpen=false;doorAngle=0;
     Drive.park(); G.drive=false;
     unpark();
     if(Phys.ready) {
@@ -126,11 +149,13 @@ const DriveRace = (() => {
     from.copy(ActorWalk.position);
     const actor=G.scene.getObjectByName('human'); handoffYaw=actor.rotation.y;
     entryEye.copy(G.camera.position);G.camera.getWorldDirection(entryLook).multiplyScalar(entryEye.distanceTo(from)).add(entryEye);
+    boardingStart=doorAngle;releaseDoor?.();releaseDoor=null;
     phase='boarding';t=0;WalkActions.setCrouch(true);Modes.keys.clear();
     visibility();
   }
   board.addEventListener('click',()=>{boardCar();board.blur();});
   addEventListener('keydown',e=>{
+    if(e.code==='KeyO'&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey)toggleDoor();
     if(e.code==='KeyE'&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&phase==='approach') {e.preventDefault();boardCar();}
   });
   function chase(camera) {
@@ -155,7 +180,7 @@ const DriveRace = (() => {
     }
     vehiclePoint(entryFocus,.4,.35,0);toward.lerpVectors(entryLook,entryFocus,sm(0,1,p));
     camera.position.copy(entryEye);camera.lookAt(toward);
-    Drive.setDoor(sm(0,.27,p)*(1-sm(.7,1,p)));
+    updateDoor(lerp(boardingStart,1,sm(0,.27,p))*(1-sm(.70,1,p)));
     if(p>=1) {
       if(actor){ actor.visible=true;actor.rotation.z=0; }
       ActorWalk.endApproach();phase='grid';t=0;placeGate();visibility();
@@ -194,6 +219,11 @@ const DriveRace = (() => {
     if(phase==='approach') {
       ActorWalk.stepApproach(camera,dt);
       const p=ActorWalk.position; promptDistance=Math.hypot(p.x-door.x,p.z-door.z);
+      const delta=clamp(Number(doorOpen)-doorAngle,-2.7*dt,2.7*dt);
+      updateDoor(doorAngle+delta);
+      doorButton.hidden=promptDistance>1.5;
+      doorButton.textContent=doorOpen?'문 닫기 (O)':'문 열기 (O)';
+      doorButton.setAttribute('aria-pressed',String(doorOpen));
       board.disabled=promptDistance>1.5 || !G.scene.getObjectByName('human');
       board.textContent=board.disabled ? '운전석까지 '+promptDistance.toFixed(1)+' m' : (navigator.maxTouchPoints?'탑승':'E  탑승');
       return '운전석 옆에서 탑승';

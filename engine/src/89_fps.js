@@ -169,7 +169,14 @@ const PulseRange = (() => {
     triggerPointer=e.pointerId;held=pressed=true;
   }
   const canvas=document.getElementById('c');
-  canvas.addEventListener('pointerdown',e=>{if(e.pointerType!=='touch')triggerDown(e);});
+  canvas.addEventListener('pointerdown',e=>{
+    if(!active || e.pointerType==='touch')return;
+    if(e.button===2){e.preventDefault();reloadCell();return;}
+    triggerDown(e);
+  });
+  // A second mouse button pressed while firing only emits mousedown, not pointerdown.
+  canvas.addEventListener('mousedown',e=>{if(active && e.button===2){e.preventDefault();reloadCell();}});
+  canvas.addEventListener('contextmenu',e=>{if(active)e.preventDefault();});
   fireButton.addEventListener('pointerdown',e=>{
     e.preventDefault();e.stopPropagation();triggerDown(e);
     if(triggerPointer===e.pointerId)fireButton.setPointerCapture(e.pointerId);
@@ -227,9 +234,9 @@ const PulseRange = (() => {
       pulse.mesh.quaternion.copy(camera.quaternion);pulse.mesh.visible=pulse.life>0;
     }
     reticle.classList.toggle('ready',aim.index>=0);reticle.classList.toggle('hit',hitTime>0);
-    const text=reload?'충전 중':ammo+' / '+capacity, report='명중 '+hits+' · 라운드 '+wave;
+    const text=reload?'재장전 중':ammo+' / '+capacity, report='명중 '+hits+' · 라운드 '+wave;
     if(count.textContent!==text)count.textContent=text;if(score.textContent!==report)score.textContent=report;
-    return ui.dataset.touch==='yes'?'스틱 이동 · 드래그 조준 · 발사':'WASD 이동 · 마우스 조준/발사 · R 재장전 · Shift 달리기 · Space 점프 · C 앉기';
+    return ui.dataset.touch==='yes'?'스틱 이동 · 드래그 조준 · 발사':'WASD 이동 · 마우스 조준 · 좌클릭 발사 · 우클릭 재장전 · Space 점프 · Shift 달리기 · C 앉기';
   }
   Modes.add('fps',{name:'1인칭 사격',enter,leave,step},'Digit3','3');
   return {get ammo(){return ammo;},get hits(){return hits;},get wave(){return wave;},get reloading(){return reload>0;}};

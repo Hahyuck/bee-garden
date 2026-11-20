@@ -11,6 +11,8 @@ const Drive = (() => {
   const car = { p: V(), q: new THREE.Quaternion(), v: V(), w: V(), comp: [0, 0, 0, 0], len: [.2, .2, .2, .2], spin: [0, 0, 0, 0], steer: 0, gear: 1, rpm: 900, slip: 0, thr: 0, air: 0, surf: 0, bad: 0 };
   const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, keys = new Set(), gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
   const touch = { acc: 0, brk: 0, st: 0, hb: 0 };
+  const topSpeed = 160 / 3.6;
+  let pedalWasDown = false;
   let doorHinge = null, brakeLight = null;
   const bx = V(), by = V(), bz = V(), F = V(), Tq = V(), A = V(), C = V(), r = V(), vC = V(), wf = V(), ws = V(), nrm = V(), f = V(), tmp = V(), camP = V(), dir = V(), tgt = V(), dq = new THREE.Quaternion(), mm = new THREE.Matrix4(), QY = new THREE.Quaternion().setFromAxisAngle(YAX, Math.PI);
   let body = null, hitT = 0; const tr0 = [V(), V()], tr1 = V(); let trOn = [false, false]; const vPrev = V(), cm = V(), _i = { x: 0, y: 0, z: 0 };
@@ -41,8 +43,19 @@ const Drive = (() => {
     brakeLight=tail; grp = new THREE.Group(); grp.name = 'car'; grp.visible = false; scene.add(grp);
     const ext = (pts, w, mat, bevel = .06) => { const g = new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(p => new THREE.Vector2(p[0], p[1]))), { depth: w - 2 * bevel, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3 }); g.rotateY(-Math.PI / 2); g.translate((w - 2 * bevel) / 2, 0, 0); const m = new THREE.Mesh(g, mat); grp.add(m); return m; };
     const bxm = (w, h, d, x, y, z, mat) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); grp.add(m); return m; };
-    ext([[-1.86, -.40], [1.84, -.40], [1.93, -.16], [1.88, .06], [1.12, .2], [-1.66, .22], [-1.88, .08], [-1.92, -.18]], 1.62, paint);            // the hull, in side view (z, y)
-    ext([[1.0, .18], [.42, .72], [-1.22, .74], [-1.72, .2]], 1.42, glass, .04);                                                                   // the glasshouse
+    // Separate the nose, sill, rear quarter and passenger side so the open door reveals a seat.
+    ext([[-1.86,-.40],[1.84,-.40],[1.93,-.24],[-1.92,-.24]],1.62,paint,.035);
+    ext([[.56,-.27],[1.86,-.27],[1.88,.06],[1.12,.2],[.56,.2]],1.62,paint,.035);
+    ext([[-1.90,-.27],[-.44,-.27],[-.44,.20],[-1.66,.22],[-1.88,.08]],1.62,paint,.035);
+    bxm(.09,.42,1.06,-.765,-.032,.055,paint);
+    bxm(1.46,.07,1.04,0,-.20,.055,trim);
+    for(const side of [-1,1]){
+      bxm(.52,.12,.56,side*.36,-.10,.05,trim);
+      bxm(.51,.45,.12,side*.36,.11,-.23,trim).rotation.x=-.13;
+    }
+    ext([[1.0,.18],[.42,.72],[.37,.72],[.94,.18]],1.42,glass,.018);
+    ext([[-.45,.20],[-.45,.72],[-1.22,.74],[-1.72,.20]],1.42,glass,.022);
+    bxm(.035,.47,.90,-.70,.45,.018,glass);
     ext([[.46, .71], [.42, .77], [-1.24, .79], [-1.28, .73]], 1.4, paint, .03);                                                                    // the roof
     for (const s of [-1, 1]) { bxm(.05, .52, .09, s * .7, .46, -.34, paint); bxm(.02, .1, 2.7, s * .815, -.06, 0, trim); bxm(.34, .12, .06, s * .56, -.02, 1.9, lamp); bxm(.3, .12, .05, s * .58, .02, -1.9, tail); }
     doorHinge = new THREE.Group(); doorHinge.name='driver-door';
@@ -52,7 +65,9 @@ const Drive = (() => {
       mesh.position.set(x,y,z); doorHinge.add(mesh);
     }
     doorPanel(.055,.45,.95,0,-.12,-.475,paint);
-    doorPanel(.04,.36,.83,-.052,.281,-.485,glass);
+    doorPanel(.04,.48,.86,-.052,.325,-.485,glass);
+    doorPanel(.08,.38,.83,-.067,-.09,-.48,trim);
+    doorPanel(.10,.055,.29,-.13,.008,-.59,wax);
     doorPanel(.07,.055,.16,.045,-.008,-.83,trim);
     for(const side of [-1,1]) {
       bxm(.18,.06,.10,side*.79,.30,.43,trim);
@@ -70,7 +85,7 @@ const Drive = (() => {
     grp.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     hud = document.createElement('div'); hud.id = 'drive-hud'; hud.style.cssText = 'position:fixed;right:14px;bottom:14px;text-align:right;font:700 13px/1.35 system-ui,sans-serif;color:#fff7e6;background:#1b1e1bcc;border:1px solid #e8ddc438;border-radius:9px;padding:7px 10px;z-index:5;pointer-events:none;display:none;font-variant-numeric:tabular-nums;white-space:pre'; document.body.appendChild(hud);
     menu = document.createElement('div'); menu.style.cssText = 'position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(6,5,3,.72);z-index:7;font:600 15px/1.9 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;text-align:center;white-space:pre';
-    menu.textContent = '일시정지\n\nW / ↑  가속      S / ↓  브레이크·후진\nA D / ← →  조향      Space  핸드브레이크\nC  카메라      B  뒤 보기      R  도로로 복귀\n\n게임패드: RT 가속 · LT 브레이크 · 왼쪽 스틱 조향 · A 핸드브레이크\n\nEsc 또는 화면을 눌러 계속하기'; menu.addEventListener('click',()=>setPaused(false)); document.body.appendChild(menu);
+    menu.textContent = '일시정지\n\nW / ↑  가속      S / ↓  브레이크·후진\nA D / ← →  조향      Space  제동 · 조향 중 드리프트\nC  카메라      B  뒤 보기      R  도로로 복귀\n\n게임패드: RT 가속 · LT 브레이크 · 왼쪽 스틱 조향 · A 제동\n\nEsc 또는 화면을 눌러 계속하기'; menu.addEventListener('click',()=>setPaused(false)); document.body.appendChild(menu);
     reset(RD.n - 6); if (typeof Phys !== 'undefined' && Phys.ready) { embody(); reset(RD.n - 6); }
   }
   function readInput() {
@@ -85,12 +100,25 @@ const Drive = (() => {
   function setPaused(v) { paused = v; if (body) Phys.hold = v; menu.style.display = v ? 'flex' : 'none'; }
   function control(dt) {
     const vf = car.v.dot(bz), spd = Math.abs(vf), lim = Math.min(CC.steerLock, CC.steerSpeedK / Math.max(spd * spd, 1)); car.steer += (inp.st * lim - car.steer) * (1 - Math.exp(-dt * (Math.abs(inp.st) > .05 ? 6 : 9)));      // the faster it goes, the less lock it is given
-    let thr = inp.acc, brk = inp.brk; if (car.gear > 0) { if (vf < .8 && brk > .1 && thr < .1) car.gear = -1; } else if (vf > -.8 && thr > .1 && brk < .1) car.gear = 1;
+    let thr = inp.acc, brk = inp.brk;
+    if (car.gear > 0) { if (Math.abs(vf)<.6 && brk>.1 && !pedalWasDown && thr<.1 && !inp.hb) car.gear=-1; }
+    else if (vf > -.8 && thr > .1 && brk < .1) car.gear = 1;
+    pedalWasDown=inp.brk>.1;
     if (car.gear < 0) { const t = thr; thr = brk; brk = t; }
     const ratio = (car.gear < 0 ? -REV : GEAR[car.gear]) * FINAL; let rpm = Math.max(spd / RAD * Math.abs(ratio) * 9.549, 900 + thr * 2200 * (1 - sm(0, 4, spd)));
     shiftT -= dt; if (car.gear > 0 && shiftT <= 0) { if (rpm > 6100 && car.gear < 5) { car.gear++; shiftT = .35; } else if (rpm < 2500 && car.gear > 1) { car.gear--; shiftT = .35; } }
     car.rpm += (Math.min(rpm, 7000) - car.rpm) * (1 - Math.exp(-dt * 12));
-    const tq = CC.torque * (1 - Math.pow((car.rpm - 4300) / 5400, 2)) * thr * (car.rpm > 6850 ? 0 : 1) * (shiftT > .2 ? 0 : 1); drive = tq * ratio * .9 / RAD; brake = brk * CC.brake; car.thr = thr;
+    brk=Math.max(brk,inp.hb);
+    thr*=1-brk;
+    car.drifting = brk>.15 && Math.abs(inp.st)>.15 && spd>3 && car.air<4;
+    const tq = CC.torque * (1 + 1.8*sm(12,36,spd)) * (1 - Math.pow((car.rpm - 4300) / 5400, 2)) * thr * (car.rpm > 6850 ? 0 : 1) * (shiftT > .2 ? 0 : 1);
+    drive = tq * ratio * .9 / RAD; brake = brk * CC.brake; car.thr = thr;
+  }
+  function limitSpeed() {
+    const speed=Math.hypot(car.v.x,car.v.z);
+    if(speed<=topSpeed)return;
+    car.v.x*=topSpeed/speed; car.v.z*=topSpeed/speed;
+    if(body)body.setLinvel(car.v,true);
   }
   function sub(h) {
     if (body) pull(); const q = car.q; bx.set(1, 0, 0).applyQuaternion(q); by.set(0, 1, 0).applyQuaternion(q); bz.set(0, 0, 1).applyQuaternion(q); F.set(0, body ? 0 : -M * G9, 0); cm.copy(car.p).addScaledVector(by, body ? COMY : 0); Tq.set(0, 0, 0); let slip = 0, air = 0;
@@ -100,14 +128,16 @@ const Drive = (() => {
       const c = Math.min(REST - len, TRAV + .08); let Fz = KS * c + CS * (c - car.comp[i]) / h; if (c > TRAV) Fz += 90000 * (c - TRAV); car.comp[i] = c; if (Fz <= 0) continue; Fz = Math.min(Fz, 4 * M * G9);
       nrm.set(-g[1], 1, -g[2]).normalize(); C.copy(A).addScaledVector(by, -(len + RAD)); r.subVectors(C, cm); vC.copy(car.w).cross(r).add(car.v);
       const st = i < 2 ? car.steer : 0; wf.copy(bz).multiplyScalar(Math.cos(st)).addScaledVector(bx, Math.sin(st)); wf.addScaledVector(nrm, -wf.dot(nrm)).normalize(); ws.crossVectors(nrm, wf);
-      const vl = vC.dot(wf), vs = vC.dot(ws), mu = Math.max(.1, MU[g[5]] * (g[5] === 0 ? 1 - CC.wetGripLoss * wet - CC.iceGripLoss * iceK : 1 - .3 * iceK) * (1 - CC.snowGripLoss * snowK)) * (i > 1 && inp.hb > .5 ? .55 : 1), al = Math.atan2(vs, Math.abs(vl) + 1.2);
+      const vl = vC.dot(wf), vs = vC.dot(ws), mu = Math.max(.1, MU[g[5]] * (g[5] === 0 ? 1 - CC.wetGripLoss * wet - CC.iceGripLoss * iceK : 1 - .3 * iceK) * (1 - CC.snowGripLoss * snowK)) * (i > 1 && car.drifting ? .43 : 1), al = Math.atan2(vs, Math.abs(vl) + 1.2);
       let Fy = -mu * Fz * Math.sin(1.5 * Math.atan(9 * al)), Fx = (i < 2 ? drive * .5 : 0) - clamp(vl * 6, -1, 1) * (brake * (i < 2 ? .31 : .19) + (i > 1 ? inp.hb * 2600 : 0)) - vl * (RR[g[5]] + CC.snowRolling * snowK);
       const mag = Math.hypot(Fx, Fy), mx = mu * Fz; if (mag > mx) { Fx *= mx / mag; Fy *= mx / mag; }
       slip += Math.min(1, Math.abs(al) * 3 + (mag > mx ? .3 : 0)) * Math.min(1, Math.abs(vl) / 6 + Math.abs(vs) / 3);
       f.copy(nrm).multiplyScalar(Fz).addScaledVector(wf, Fx).addScaledVector(ws, Fy); F.add(f); if (!body) r.y *= .45; Tq.add(tmp.crossVectors(r, f)); car.spin[i] += vl / RAD * h; }
+    if(car.drifting)Tq.addScaledVector(by,inp.st*Math.sign(car.v.dot(bz))*IY*.77);
     F.addScaledVector(car.v, -CC.drag * car.v.length());
+    limitSpeed();
     if (body) { _i.x = F.x * h; _i.y = F.y * h; _i.z = F.z * h; body.applyImpulse(_i, true); _i.x = Tq.x * h; _i.y = Tq.y * h; _i.z = Tq.z * h; body.applyTorqueImpulse(_i, true); car.slip = slip / 4; car.air = air; return; }
-    car.v.addScaledVector(F, h / M);
+    car.v.addScaledVector(F, h / M); limitSpeed();
     let wx = car.w.dot(bx) + Tq.dot(bx) / IX * h, wy = car.w.dot(by) + Tq.dot(by) / IY * h, wz = car.w.dot(bz) + Tq.dot(bz) / IZ * h; const dmp = 1 - h * (air === 4 ? .2 : 1.2); wx *= dmp; wz *= 1 - h * (air === 4 ? .2 : 2.6); wy *= 1 - h * .4;
     car.w.set(0, 0, 0).addScaledVector(bx, wx).addScaledVector(by, wy).addScaledVector(bz, wz); car.p.addScaledVector(car.v, h);
     dq.set(car.w.x * h * .5, car.w.y * h * .5, car.w.z * h * .5, 0).multiply(q); q.x += dq.x; q.y += dq.y; q.z += dq.z; q.w += dq.w; q.normalize(); car.slip = slip / 4; car.air = air;
@@ -124,7 +154,7 @@ const Drive = (() => {
   function step(camera, dt) {
     if (!grp) return ''; readInput();
     if (!paused) { const te = G.tEnv === undefined ? G.t : G.tEnv; wet = sm(31.2, 36, te) * (1 - sm(68, 76, te)); if (typeof Weather !== 'undefined') { wet = Weather.S.wet; snowK = Weather.S.cover; iceK = Weather.S.ice; }
-      if (body) pull(); bx.set(1, 0, 0).applyQuaternion(car.q); by.set(0, 1, 0).applyQuaternion(car.q); bz.set(0, 0, 1).applyQuaternion(car.q); control(dt);
+      if (body) { pull(); limitSpeed(); } bx.set(1, 0, 0).applyQuaternion(car.q); by.set(0, 1, 0).applyQuaternion(car.q); bz.set(0, 0, 1).applyQuaternion(car.q); control(dt);
       for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z); const s0 = Island.surf(A.x, A.z), y0 = s0[0], ty = s0[1];
         g[0] = y0; g[1] = (Island.surf(A.x + .4, A.z)[0] - y0) / .4; g[2] = (Island.surf(A.x, A.z + .4)[0] - y0) / .4; g[3] = A.x; g[4] = A.z; g[5] = ty; if (i === 0) car.surf = ty; }
       if (!body) { const n = clamp(Math.ceil(dt * 240), 1, 12), h = dt / n; for (let i = 0; i < n; i++) sub(h); }
@@ -141,8 +171,10 @@ const Drive = (() => {
     else { const dist = camMode ? 9.5 : 6.4, hgt = camMode ? 3.4 : 2.2; tgt.copy(car.p).addScaledVector(dir, -dist * sgn); tgt.y += hgt; if (!camInit) { camP.copy(tgt); camInit = true; } camP.lerp(tgt, 1 - Math.exp(-dt * 6));
       camP.y = Math.max(camP.y, Island.surf(camP.x, camP.z)[0] + .7); camera.position.copy(camP); tgt.copy(car.p).addScaledVector(dir, 2.5 * sgn); tgt.y += .9; mm.lookAt(camP, tgt, YAX); camera.quaternion.setFromRotationMatrix(mm); }
     camera.fov = lerp(58, 74, sm(0, 45, sp)); camera.near = .3;
-    const kmh = Math.round(sp * 3.6), bar = '▮'.repeat(Math.round(clamp(car.rpm / 7000) * 14)).padEnd(14, '▯');
-    hud.textContent = `${kmh} km/h   ${car.gear < 0 ? 'R' : 'D'+car.gear}\n${bar}` + (car.off > 9 ? '\nR  도로로 복귀' : '');
+    const kmh=Math.min(160,Math.round(Math.hypot(car.v.x,car.v.z)*3.6));
+    const bar='▮'.repeat(Math.round(kmh/160*14)).padEnd(14,'▯');
+    const state=car.drifting?'드리프트':brake>0?'제동':car.thr>.1?'가속':kmh?'관성 주행':'정차';
+    hud.textContent=String(kmh).padStart(3,'0')+' km/h   '+(car.gear<0?'R':'D'+car.gear)+'\n'+state+'  '+bar+(car.off>9?'\nR  도로로 복귀':'');
     sound(); return ['아스팔트', '갓길', '풀밭', '모래'][car.surf] + (iceK > .3 ? ' · 빙판' : snowK > .3 ? ' · 눈길' : wet > .3 ? ' · 젖음' : '') + ' · C 카메라 · Esc 조작법';
   }
   function enter() { on = true; grp.visible = true; if (body) { body.setEnabled(true); Phys.prime(car.p.x, car.p.z); } hud.style.display = ''; keys.clear(); camInit = false; }
@@ -154,7 +186,7 @@ const Drive = (() => {
       wheels[i].position.set(WL[i].x,WL[i].y-car.len[i],WL[i].z);
       wheels[i].rotation.set(0,0,0);
     }
-    doorHinge.rotation.y=0; car.spin.fill(0); hitT=0; trOn.fill(false); drive=brake=0;
+    doorHinge.rotation.y=0; car.spin.fill(0); hitT=0; trOn.fill(false); drive=brake=0; pedalWasDown=false; car.drifting=false;
   }
   function finish() {
     on=false; if(body) body.setEnabled(false);
@@ -167,7 +199,7 @@ const Drive = (() => {
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); });
   addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
   return { build, step, enter, leave, finish, park, reset, car, inp, keys, touch,
-    setDoor(open) { doorHinge.rotation.y=-1.03*open; },
+    setDoor(open) { doorHinge.rotation.y=-1.39*clamp(open); },
     get on() { return on; }, get body() { return body; }, get paused() { return paused; },
     recover:back };
 })();

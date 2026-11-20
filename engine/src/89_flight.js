@@ -14,6 +14,16 @@ const Airfield = (() => {
   let active = false, phase = 'approach', heading = 0, pitch = 0, bank = 0;
   let speed = 0, throttle = 0, climb = 0, autoClimb = 0, recovery = 0, cameraReady = false;
   let boardDistance = Infinity, message = '', messageTime = 0;
+  let mousePitch=0, canopy=null;
+  const jumper=new THREE.Vector3(), drift=new THREE.Vector3();
+  const canvas=document.getElementById('c');
+  canvas.addEventListener('pointermove',e=>{
+    if(!active || e.pointerType!=='mouse' || (phase!=='taxi' && phase!=='flight'))return;
+    const rect=canvas.getBoundingClientRect(), vertical=1-2*(e.clientY-rect.top)/rect.height;
+    mousePitch=Math.sign(vertical)*sm(.08,.85,Math.abs(vertical));
+  });
+  canvas.addEventListener('pointerleave',()=>{mousePitch=0;});
+  addEventListener('blur',()=>{mousePitch=0;});
   const isTouch = () => navigator.maxTouchPoints > 0 || matchMedia('(any-pointer: coarse)').matches;
 
   function onDeck(x,z,margin=0) {
@@ -159,12 +169,12 @@ const Airfield = (() => {
   const boardButton=controls.querySelector('[data-act=board]'), powerButtons=controls.querySelector('#airfield-power');
   function refreshUI() {
     if (!active) return;
-    const walking=phase==='approach', stopped=phase==='taxi'&&speed<1.3;
-    controls.dataset.phase=phase; boardButton.hidden=!walking&&!stopped;
+    const walking=phase==='approach', piloting=phase==='taxi'||phase==='flight';
+    controls.dataset.phase=phase; boardButton.hidden=!walking&&!piloting;
     boardButton.disabled=walking&&boardDistance>2.8;
-    const text=walking ? (boardDistance<=2.8?'비행기 탑승 (E)':'비행기로 걸어가기') : '비행기에서 내리기 (E)';
+    const text=walking ? (boardDistance<=2.8?'비행기 탑승 (E)':'비행기로 걸어가기') : phase==='flight'?'낙하산 하차 (E)':'비행기에서 내리기 (E)';
     if(boardButton.textContent!==text) boardButton.textContent=text;
-    powerButtons.hidden=walking || !isTouch();
+    powerButtons.hidden=!piloting || !isTouch();
   }
   const tag = act => controls.querySelector('[data-act="'+act+'"]');
   for (const act of ['more','less','brake']) {
@@ -193,6 +203,7 @@ const Airfield = (() => {
   });
 
   function resetPlane() {
+    mousePitch=0;plane.visible=true;if(canopy)canopy.visible=false;
     position.set(strip.x,strip.y,strip.z-145);
     heading=pitch=bank=speed=throttle=climb=autoClimb=recovery=0; cameraReady=false;
     sync();
@@ -256,8 +267,10 @@ const Airfield = (() => {
       boardingRange();
       if(boardDistance>2.8) return;
       ActorWalk.endApproach(); removeParkedSolids(); phase='taxi'; WalkStick.setActive(true); cameraReady=false; messageTime=0;
-    } else if(phase==='taxi' && speed<1.3) {
-      throttle=speed=0; approach(false);
+    } else if(phase==='taxi') {
+      throttle=speed=pitch=bank=climb=mousePitch=0; approach(false);
+    } else if(phase==='flight'){
+      bailOut();
     }
     refreshUI();
   }
@@ -285,18 +298,58 @@ const Airfield = (() => {
     phase='recover'; recovery=1.25; throttle=0; speed=0; message=reason; messageTime=2;
     WalkStick.setActive(false);
   }
+  function bailOut() {
+    if(!canopy){
+      canopy=new THREE.Group();canopy.name='recovery-parachute';
+      const dome=new THREE.Mesh(new THREE.SphereGeometry(1,24,8,0,TAU,0,Math.PI*.47),material(0xd27634,.8));
+      dome.scale.set(2.4,.95,1.5);dome.position.y=3.4;dome.material.side=THREE.DoubleSide;canopy.add(dome);
+      const cord=new THREE.LineBasicMaterial({color:0xded9be});
+      for(const x of [-1.85,1.85])for(const z of [-.72,.72]){
+        const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x,3.5,z),new THREE.Vector3(x*.09,1.05,0)]);
+        canopy.add(new THREE.Line(geo,cord));
+      }
+      box(canopy,.46,.62,.28,0,1.02,0,material(0x435a5d));
+      box(canopy,.29,.29,.29,0,1.48,0,material(0xe3c49c));
+      for(const x of [-.13,.13])box(canopy,.16,.65,.18,x,.35,0,material(0x363d43));
+      field.add(canopy);
+    }
+    jumper.copy(position);jumper.x-=2*Math.cos(heading);jumper.y+=1.2;
+    drift.set(Math.sin(heading)*speed,0,Math.cos(heading)*speed);
+    phase='canopy';canopy.visible=true;canopy.position.copy(jumper);mousePitch=0;
+  }
+  function descend(camera,dt) {
+    const turn=Number(Modes.keys.has('KeyA'))-Number(Modes.keys.has('KeyD'))-WalkStick.x;
+    heading+=turn*1.25*dt;
+    drift.lerp(view.set(3*Math.sin(heading),0,3*Math.cos(heading)),1-Math.exp(-dt*1.5));
+    jumper.addScaledVector(drift,dt);jumper.y-=3.8*dt;
+    // The unpiloted plane continues away while the canopy slows the pilot.
+    plane.translateZ(dt*speed);canopy.position.copy(jumper);canopy.rotation.y=heading;
+    camera.position.copy(jumper).add(view.set(-7*Math.sin(heading),3,-7*Math.cos(heading)));
+    camera.lookAt(jumper.x,jumper.y+1.5,jumper.z);camera.fov=62;
+    const deck=floor(jumper.x,jumper.z),ground=deck??Island.support(jumper.x,jumper.z);
+    if(jumper.y<=Math.max(ground,CFG.sea.level)){
+      if(deck===null && ground<CFG.sea.level+.15)Marine.rescue(jumper.x,jumper.z,heading);
+      else {
+        resetPlane();phase='approach';sync();addParkedSolids();WalkStick.setActive(false);
+        ActorWalk.beginApproach(jumper.x,jumper.z,heading,floor);boardingRange();refreshUI();
+      }
+    }
+    return '낙하산 하강 · A/D 방향 · R 활주로 복귀';
+  }
   function piloting(dt) {
     previous.copy(position);
     const keys=Modes.keys;
     const power=Number(keys.has('KeyW')||touch.has('more'))-Number(keys.has('KeyS')||touch.has('less'));
     const stickX=clamp(WalkStick.x+Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft')),-1,1);
-    const stickY=clamp(WalkStick.y+Number(keys.has('ArrowUp'))-Number(keys.has('ArrowDown')),-1,1);
+    const keyPitch=Number(keys.has('ArrowUp'))-Number(keys.has('ArrowDown'));
+    const stickY=keyPitch || (Math.abs(WalkStick.y)>.04?WalkStick.y:mousePitch);
     const brakes=keys.has('Space')||touch.has('brake');
     throttle=clamp(throttle+power*(power>0?.47:.70)*dt);
     const grounded=phase==='taxi';
-    if(brakes&&grounded) throttle=Math.max(0,throttle-1.1*dt);
+    if(brakes&&grounded) throttle=0;
     const drag=(grounded?.63:0)+.00195*speed*speed;
-    speed=clamp(speed+(throttle*8.4-drag-(brakes&&grounded?9.5:0))*dt,0,75);
+    speed=clamp(speed+(throttle*8.4-drag-(brakes&&grounded?28:0))*dt,0,75);
+    if(grounded&&brakes&&speed<.65)speed=0;
     if(propeller) propeller.rotation.z-=dt*(7+throttle*67);
     if(grounded) {
       heading-=stickX*sm(.15,4,speed)*lerp(.83,.21,sm(5,23,speed))*dt;
@@ -344,6 +397,7 @@ const Airfield = (() => {
     camera.lookAt(look); camera.fov=camera.aspect<1?61:56+4*sm(10,50,speed); camera.near=.15;
   }
   function step(camera,dt) {
+    if(phase==='canopy')return descend(camera,dt);
     sock.rotation.z=-.15+.055*Math.sin(G.t*2.4); sock.rotation.y=.72+.12*Math.sin(G.t*.53);
     if(phase==='approach') {
       ActorWalk.stepApproach(camera,dt); boardingRange(); refreshUI();
@@ -356,12 +410,12 @@ const Airfield = (() => {
     cameraFollow(camera,dt); refreshUI(); messageTime=Math.max(0,messageTime-dt);
     if(phase==='recover') return message+' · 활주로 복귀 중';
     const kmh=Math.round(speed*3.6), stats=kmh+' km/h · 출력 '+Math.round(throttle*100)+'%';
-    if(phase==='taxi') return (messageTime>0?message:(isTouch()?'활주 · 출력 + · 스틱 ↑ 이륙':'활주 · W/S 출력 · ↑ 이륙 · Space 제동'))+' · '+stats;
+    if(phase==='taxi') return (messageTime>0?message:(isTouch()?'활주 · 출력 + · 스틱 ↑ 이륙':'활주 · W/S 출력 · 마우스 위 이륙 · Space 제동'))+' · '+stats;
     const dx=strip.x-position.x, dz=strip.z-position.z;
     const delta=Math.atan2(Math.sin(heading-Math.atan2(dx,dz)),Math.cos(heading-Math.atan2(dx,dz)))*180/Math.PI;
     const path=Math.round(Math.hypot(dx,dz))+' m '+(Math.abs(delta)<8?'정면':(delta>0?'오른쪽 ':'왼쪽 ')+Math.round(Math.abs(delta))+'°');
     return stats+' · 고도 '+Math.round(position.y-strip.y)+' m · 활주로 '+path+
-      (isTouch()?'':'\nA/D 선회 · ↑/↓ 기수 · W/S 출력 · R 활주로 복귀');
+      (isTouch()?'':'\nA/D 선회 · 마우스 위/아래 기수 · E 낙하산 하차 · R 활주로 복귀');
   }
   Modes.add('flight',{name:'경비행기',enter,leave,step},'Digit5','5');
   return { get state(){return {phase,speed,throttle,heading,pitch,bank,climb,position:position.toArray(),boardDistance};} };

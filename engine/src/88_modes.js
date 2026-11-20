@@ -33,7 +33,7 @@ const Modes = (() => {
   const picker = document.createElement('select');
   picker.id='mode-picker'; picker.setAttribute('aria-label','플레이 모드');
   picker.style.cssText='position:fixed;right:max(14px,env(safe-area-inset-right));top:100px;z-index:6;max-width:148px;height:35px;background:#211e1aee;color:#f3e6d2;border:1px solid #eddbbf55;border-radius:8px;padding:3px 8px;font:600 13px system-ui;cursor:pointer;color-scheme:dark';
-  for (const [id,label] of [['free','1 자유 비행'],['bee','2 벌'],['fps','3 FPS'],['drive','4 레이싱'],['flight','5 경비행'],['actors','V 캐릭터'],['collect','0 통 모으기'],['sample','모델 보기']]) {
+  for (const [id,label] of [['free','1 자유 비행'],['bee','2 벌'],['fps','3 FPS'],['drive','4 레이싱'],['flight','5 경비행'],['boat','6 배'],['sub','7 잠수함'],['actors','V 캐릭터'],['collect','0 통 모으기'],['sample','모델 보기']]) {
     const opt = new Option(label,id); if (id==='sample') opt.disabled=true; picker.add(opt);
   }
   picker.addEventListener('focus',()=>keys.clear());
@@ -56,7 +56,7 @@ const Modes = (() => {
     const high = camera.position.y - Math.max(Island.surf(camera.position.x, camera.position.z)[0], 0); shadows(camera, cur === 'bee' && !fix ? 2 : high>45 ? 0 : high<8 && ['actors','fps','drive','flight','sample'].includes(cur) ? 3 : 1);
     if (performance.now() - hudAt > 250) {
       hudAt = performance.now();
-      const modes = innerWidth < 820 ? MODES[cur].name : '1 자유   2 벌   3 FPS   4 레이싱   5 경비행   V 캐릭터   H 활용법';
+      const modes = innerWidth < 820 ? MODES[cur].name : '1 자유   2 벌   3 FPS   4 레이싱   5 경비행   6 배   7 잠수함   V 캐릭터   H 활용법';
       hud.textContent = modes + '\n' + line;
     } }
   addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); if (e.code === 'KeyB' && !e.repeat && cur === 'bee') eyeOn = !eyeOn; const id=shortcuts[e.code] || extra[e.code]; if (id && !e.repeat) set(id); if (cur==='actors' && e.code.startsWith('Arrow')) e.preventDefault(); });

@@ -20,12 +20,17 @@ const ActorWalk = (() => {
     return Number.isFinite(extra) ? Math.max(y,extra) : y;
   }
 
-  function humanActions(mixer, clips) {
+  function humanActions(mixer, clips, imported) {
     const names = {idle:'TrailIdle', walk:'TrailWalk', run:'TrailRun', jump:'TrailJump',
       crouch:'TrailCrouch', crouchWalk:'TrailCrouchWalk'};
     const actions = {};
     for (const [key,name] of Object.entries(names)) {
-      const clip = THREE.AnimationClip.findByName(clips,name);
+      let clip = THREE.AnimationClip.findByName(clips,name);
+      if(!clip && imported){
+        const aliases={idle:/idle|stand|rest/i,walk:/walk/i,run:/run|jog|walk/i,jump:/jump|leap/i,crouch:/crouch.?idle|squat|crouch$/i,crouchWalk:/crouch.*walk|sneak|walk/i};
+        const usable=clips.find(a=>aliases[key].test(a.name)) || clips.find(a=>aliases.idle.test(a.name));
+        clip=usable?.clone() || new THREE.AnimationClip(name,1,[]);
+      }
       if (!clip) throw new Error('Missing character animation: ' + name);
       actions[key] = mixer.clipAction(clip).setEffectiveWeight(key === 'idle' ? 1 : 0).play();
     }
@@ -68,12 +73,13 @@ const ActorWalk = (() => {
     const mixer = new THREE.AnimationMixer(model);
     const motion = animations.find(a => (kind === 'human' ? /walk/i : /hop/i).test(a.name));
     const idle = animations.find(a => /idle/i.test(a.name));
-    const actions = kind === 'human' ? humanActions(mixer,animations) : null;
+    const actions = kind === 'human' ? humanActions(mixer,animations,entry?.custom) : null;
     const rest = !actions && idle && mixer.clipAction(idle).play();
     const move = !actions && motion && mixer.clipAction(motion).setEffectiveWeight(0).play();
     mixer.update(0);
     const soles = actions ? Footing.bind(model) : null;
-    return { holder, model, mixer, actions, rest, move, entry, kind, motion, soles, fresh: true };
+    return { holder, model, mixer, actions, rest, move, entry, kind, motion, soles, fresh: true,
+      scaleY:model.scale.y,baseY:model.position.y,approxCrouch:entry?.custom&&!animations.some(a=>/crouch|squat|sneak/i.test(a.name))};
   }
 
   function install(actor) {
@@ -137,12 +143,13 @@ const ActorWalk = (() => {
     if (!active || e.target !== G.R.domElement || orbitPointer !== null || e.button !== 0) return;
     if (firstPerson && e.pointerType === 'mouse' && !document.pointerLockElement)
       e.target.requestPointerLock?.()?.catch?.(() => {});
-    if (firstPerson && document.pointerLockElement === e.target) return;
+    if (firstPerson && e.pointerType==='mouse') return;
     orbitPointer = e.pointerId; pointerX = e.clientX; pointerY = e.clientY;
     if (!firstPerson || e.pointerType !== 'mouse') e.target.setPointerCapture(e.pointerId);
   });
   addEventListener('pointermove', e => {
-    if (firstPerson && document.pointerLockElement === G.R.domElement) {
+    if (active && firstPerson && e.pointerType==='mouse' &&
+        (document.pointerLockElement === G.R.domElement || e.target===G.R.domElement)) {
       azimuth -= e.movementX*.0026; pitch = clamp(pitch-e.movementY*.0026,-1.34,1.34); return;
     }
     if (e.pointerId !== orbitPointer) return;
@@ -245,7 +252,7 @@ const ActorWalk = (() => {
     let z = WalkStick.y + Number(keys.has('KeyW') || keys.has('ArrowUp')) - Number(keys.has('KeyS') || keys.has('ArrowDown'));
     const length = Math.max(1, Math.hypot(x,z));
     x /= length; z /= length;
-    const cosine = Math.cos(azimuth), sine = Math.sin(azimuth);
+    const yaw=VisualStyle.walkYaw()??azimuth,cosine=Math.cos(yaw),sine=Math.sin(yaw);
     const dx = (cosine*x - sine*z)*speed*dt, dz = (-sine*x - cosine*z)*speed*dt;
     const startX = feet.x, startZ = feet.z;
     if (!tryMove(dx, dz) && dx && dz) {
@@ -318,6 +325,10 @@ const ActorWalk = (() => {
     actor.fresh = false;
     actor.holder.position.copy(feet); actor.holder.rotation.y = facing;
     actor.mixer.update(dt);
+    if(actor.approxCrouch){
+      const k=1-.28*(a.crouch.getEffectiveWeight()+a.crouchWalk.getEffectiveWeight());
+      actor.model.scale.y=actor.scaleY*k;actor.model.position.y=actor.baseY*k;
+    }
     if (actor.holder.visible && jumpStage!=='air') Footing.place(actor,footprintGround,a.run.getEffectiveWeight()>.2);
   }
 
@@ -325,7 +336,7 @@ const ActorWalk = (() => {
     const touchJump = WalkActions.consumeJump();
     if ((jumpPressed || touchJump) && (jumpStage === 'ground' || jumpStage === 'land')) {
       WalkActions.setCrouch(false);
-      jumpStage = 'windup'; stageTime = 0;
+      jumpStage = 'windup'; stageTime = firstPerson ? windup : 0;
     }
     jumpPressed = false;
     const height=actors.human.entry?.height || 1.71;

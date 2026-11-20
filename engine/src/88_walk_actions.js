@@ -80,10 +80,15 @@ const WalkActions = (() => {
   });
   controls.addEventListener('keydown', e => e.stopPropagation());
   picker.addEventListener('focus', () => Modes.keys.clear());
+  const people=new Map();
+  function addPerson(entry){
+    if(!people.has(entry.id))picker.add(new Option(entry.label,entry.id));
+    people.set(entry.id,entry);
+  }
   function configurePeople(entries, choose) {
-    for (const entry of entries) picker.add(new Option(entry.label, entry.id));
+    for (const entry of entries) addPerson(entry);
     picker.addEventListener('change', () => {
-      const entry = entries.find(item => item.id === picker.value);
+      const entry = people.get(picker.value);
       if (entry) choose(entry);
       picker.blur();
     });
@@ -96,7 +101,7 @@ const WalkActions = (() => {
   addEventListener('blur', reset);
   document.addEventListener('visibilitychange', () => { if (document.hidden) reset(); });
   return {
-    configurePeople,
+    configurePeople,addPerson,removePerson(id){people.delete(id);for(const o of picker.options)if(o.value===id){o.remove();break;}},
     setCharacter(id) { picker.value = id; },
     setActive(on) { controls.hidden = !on; if (!on) reset(); showTouchControls(); },
     get run() { return running; },
