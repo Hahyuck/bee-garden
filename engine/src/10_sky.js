@@ -52,6 +52,8 @@ const Sky = (() => {
     const wet = typeof Weather !== 'undefined' ? Math.max(Weather.S.rain, Weather.S.snowing * .8) : 0;
     G.U.uSunDir.value.copy(light); G.U.uSunK.value.set(sun.color.r, sun.color.g, sun.color.b).multiplyScalar(sun.intensity / Math.PI * .5); G.U.uFogCol.value.copy(U.uHor.value).multiplyScalar(.92);
     sun.castShadow = G.look.shadows; G.U.uFogP.value.set(G.look.air ? C.fogDensity * (1 + 7 * wet + 2 * storm) : 0, C.fogFalloff, 0, 1 - storm);
+    // mist gathers when the sun is low, after rain and in snow, and the wind clears it
+    { const wnd = typeof Weather !== 'undefined' ? Weather.S.speed : 4, m = (.75 * (1 - sm(.04, .3, Math.abs(y))) * sm(-.25, -.02, y) + .5 * wet + .15) * (1 - sm(7, 18, wnd)); G.U.uFogM.value.set(G.look.air ? C.mist * m : 0, C.mistFalloff); }
     drift += dt * (.004 + .012 * storm); U.uSkyP.value.set(cover, storm, night, drift); }
 
   addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === ']') G.day = (G.day + 1) % 24; else if (e.key === '[') G.day = (G.day + 23) % 24; else if (e.code === 'KeyT' && !e.repeat) flow = !flow; });

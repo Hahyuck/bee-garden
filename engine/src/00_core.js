@@ -30,7 +30,7 @@ const NZ = (() => {
 // what every module can see. U holds the uniforms of the light and the air, fed to every material that is compiled.
 const G = { t: 0, tAbs: 0, day: 10, look: { shadows: true, air: true, bounce: true, field: true, shafts: true, bloom: true, adapt: true, film: true },      // look: the parts of the lighting, each of which can be switched off to compare
   uTime: { value: 0 }, uGust: { value: 0 }, uWind: { value: 0 }, tick: [], info: {},
-  U: { uSunDir: { value: new THREE.Vector3(.4, .8, .45).normalize() }, uSunK: { value: new THREE.Vector3(1, 1, 1) }, uFogCol: { value: new THREE.Vector3(.62, .72, .85) }, uFogP: { value: new THREE.Vector4(.0004, .012, 0, 1) } } };
+  U: { uSunDir: { value: new THREE.Vector3(.4, .8, .45).normalize() }, uSunK: { value: new THREE.Vector3(1, 1, 1) }, uFogCol: { value: new THREE.Vector3(.62, .72, .85) }, uFogP: { value: new THREE.Vector4(.0004, .012, 0, 1) }, uFogM: { value: new THREE.Vector2(0, .25) } } };
 
 const GLSL_NOISE = /* glsl */`
 #ifndef CL_NOISE
@@ -63,14 +63,15 @@ vec3 clWind(vec3 wp, float w){
 const GLSL_AIR = /* glsl */`
 #ifndef CL_AIR
 #define CL_AIR
-uniform vec3 uSunDir, uSunK, uFogCol; uniform vec4 uFogP;
+uniform vec3 uSunDir, uSunK, uFogCol; uniform vec4 uFogP; uniform vec2 uFogM;
 #ifndef SUN_DIR
 #define SUN_DIR uSunDir
 #endif
 vec3 clSunK(vec3 wp, out float so){ so = 1.; return uSunK; }
 vec3 clAir(vec3 col, vec3 wp){ vec3 v = wp - cameraPosition; float d = length(v); vec3 n = v / max(d, 1e-4);
   float t = uFogP.y * v.y, k = abs(t) > 1e-3 ? (1. - exp(-t)) / t : 1., od = uFogP.x * min(exp(-uFogP.y * (cameraPosition.y - uFogP.z)), 3.) * d * k;
-  vec3 fc = mix(uFogCol, uFogCol + uSunK * .5, pow(max(dot(n, uSunDir), 0.), 8.) * uFogP.w); return mix(col, fc, clamp(1. - exp(-od), 0., 1.)); }
+  float t2 = uFogM.y * v.y, k2 = abs(t2) > 1e-3 ? (1. - exp(-t2)) / t2 : 1.; od += uFogM.x * min(exp(-uFogM.y * (cameraPosition.y - uFogP.z)), 3.) * d * k2;      // the mist: thick at the waterline, gone a few metres up
+  float sd = max(dot(n, uSunDir), 0.); vec3 fc = uFogCol + uSunK * (.5 * pow(sd, 8.) + .9 * pow(sd, 48.)) * uFogP.w; return mix(col, fc, clamp(1. - exp(-od), 0., 1.)); }
 #endif
 `;
 // three.js's own fog is replaced by that air in every built-in material (scene.fog only switches it on)

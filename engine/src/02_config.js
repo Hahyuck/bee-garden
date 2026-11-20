@@ -35,6 +35,7 @@ const CFG = {
     noonElevation: 58, azimuth: 150,
     sunIntensity: 9, fillIntensity: 3,
     fogDensity: .00022, fogFalloff: .006,
+    mist: .008, mistFalloff: .22,      // the low mist: how thick at the waterline, how fast it thins with height
   },
   sea: { level: 0, swell: .22, windSwell: .9 },
   light: { occlusion: .5, bounce: .05 },       // the light field: how much the canopy blocks the sky's fill, how much sunlit canopy gives back
