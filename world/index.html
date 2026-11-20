@@ -2561,6 +2561,7 @@ vec3 isGround(){
 
   // ---- the forest in three stages by distance: full boughs near, plain tiers further off, a drawn outline far away;
   //      and within a few metres, sprays of needles on the bough ends of the nearest trees ----
+  const ROCKS = [];      // boulders big enough to stop something: the physics makes them solid
   const FOREST = { list: [], cells: new Map(), sprays: null, last: new THREE.Vector3(1e9, 0, 0), P: null };
   function addTree(x, y, z, larch, s) { const kx = Math.floor(x / 90), kz = Math.floor(z / 90), k = kx + ',' + kz; let c = FOREST.cells.get(k);
     if (!c) { c = { x: (kx + .5) * 90, z: (kz + .5) * 90, t: [[], []], m: [[], []], lod: -1 }; FOREST.cells.set(k, c); FOREST.list.push(c); }
@@ -2596,7 +2597,7 @@ vec3 isGround(){
     const P = { near: [conifer(false, 15, 18, true, .34, 3), conifer(true, 13, 18, true, .34, 3)], mid: [conifer(false, 8, 10), conifer(true, 7, 10)], far: [outline(), outline()],
       tuft: [tuft(.36, 14), tuft(.3, 14), tuft(.42, 13)], bil: [bilberry(), bilberry()], fern: [fern(), fern()], rock: [0, 1, 2, 3].map(i => K.tag(K.blob(i * 7.3 + 1, .3, 14, 10), '#ffffff', 7, K.M([0, 0, 0], [0, 0, 0], [1, .72, 1]))),
       log: K.merge([K.tag(K.tube([V(-2.2, .16, 0), V(0, .2, .1), V(2.2, .14, 0)], t => .17 - .05 * t, 7), '#b8ab98', 4), K.tag(K.tube([V(.6, .2, 0), V(.9, .5, .3), V(1.1, .9, .4)], t => .05 - .03 * t, 4), '#b8ab98', 4)]) };
-    const B = K.buckets(grp, 60);
+    const B = K.buckets(grp, 60); { const put0 = B.put; B.put = (key, geo, mat, x, y, z, rot, s, sy, col, ...more) => { if (key[0] === 'r' && s >= .45) ROCKS.push([x, y, z, s, sy === undefined ? s : sy]); return put0.call(B, key, geo, mat, x, y, z, rot, s, sy, col, ...more); }; }
     // forest: trees everywhere under the treeline, larches as it nears
     const cell = LOW ? 9 : 6.5; for (let x = IC.x - 520; x < IC.x + 520; x += cell) for (let z = IC.z - 520; z < IC.z + 520; z += cell) { const px = x + rr(0, cell), pz = z + rr(0, cell), h = H0(px, pz); if (h < 9 || h > tlAt(px, pz) || R() > .86) continue;
       if (Math.hypot(px - GP.x, pz - GP.z) < 24 || nearTrail(px, pz).d < 5.5 || nearRoad(px, pz).d < 9) continue; const g = grad(px, pz); if (Math.hypot(g[0], g[1]) > 1.0) continue;
@@ -2622,7 +2623,7 @@ vec3 isGround(){
     G.tick.push(() => { followGrass(G.camera.position); followForest(G.camera.position); }); followGrass(V(GP.x, 0, GP.z)); while (tileQ.length) followGrass(V(GP.x, 0, GP.z)); followForest(V(GP.x, 0, GP.z));
     G.info.island = { trail: T.n, road: RD.len, summit: [Math.round(SUMMIT.x), Math.round(SUMMIT.y), Math.round(SUMMIT.z)], ms: Math.round(performance.now() - t0) }; prog(1);
   }
-  return { build, H0, ground, surf, nearTrail, nearRoad, RD, T, SUMMIT, GP, IC, TREELINE, MEADOW };
+  return { build, H0, ground, surf, nearTrail, nearRoad, RD, T, SUMMIT, GP, IC, TREELINE, MEADOW, FOREST, ROCKS };
 })();
 
 // ===== 44_garden.js =====
@@ -8338,6 +8339,103 @@ const Post = (() => {
   return { init(r) { R = r; }, size, render, warm, fxU, GLSL_FXDEPTH, lens, get W() { return W; }, get H() { return H; }, mCopy };
 })();
 
+// ===== 85_phys.js =====
+
+// ---- physics for the whole world, not for one object: a rigid-body world (Rapier, https://rapier.rs, Apache-2.0) that every mode shares.
+//      What is solid: the island's ground (streamed as tiles of triangles around whoever is looking), tree trunks, boulders.
+//      What moves: anything spawned through Phys.spawn (crates, barrels, cones, stones) and bodies other modules bring (the car).
+//      What acts on them: gravity, contact and friction (the solver), the sea (buoyancy and drag below the waterline), the storm's wind, blasts.
+//      Fixed step of 1/240 s; modules that make their own forces hook into each step with Phys.pre. If the engine cannot be loaded, Phys.ready stays false. ----
+const Phys = (() => {
+  const URL = 'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs', H = 1 / 240, TS = 32, SEA = 0;
+  let R = null, world = null, ready = false, acc = 0, hold = false, scene = null, steps = 0, stepMs = 0;
+  const pre = [], bodies = [], tiles = new Map(), cells = new Map(), queue = [], focus = new THREE.Vector3(1e9, 0, 0), wind = new THREE.Vector3(), blasts = [];
+  const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _c = new THREE.Color(), _v = { x: 0, y: 0, z: 0 }, _d = new THREE.Vector3(), _f = new THREE.Vector3();
+  const std = (c, m, ro) => new THREE.MeshStandardMaterial({ color: c, metalness: m, roughness: ro });
+  // the kinds of loose thing the world knows how to make. vol: displaced volume (for the sea), area: what the wind gets hold of
+  const KIND = {
+    crate: { n: 220, geo: () => new THREE.BoxGeometry(.6, .5, .6), col: c => c.cuboid(.3, .25, .3), rho: 210, fr: .7, re: .05, vol: .18, r: .3, area: .3, tint: 0xd9c592 },
+    barrel: { n: 120, geo: () => new THREE.CylinderGeometry(.29, .29, .88, 18), col: c => c.cylinder(.44, .29), rho: 130, fr: .5, re: .15, vol: .23, r: .4, area: .5, tint: 0x2d6fb5 },
+    cone: { n: 200, geo: () => { const g = new THREE.ConeGeometry(.2, .7, 14); return g; }, col: c => c.cone(.35, .2), rho: 110, fr: .8, re: .1, vol: .03, r: .3, area: .14, tint: 0xf26a1b },
+    stone: { n: 160, geo: () => new THREE.IcosahedronGeometry(.16, 1), col: c => c.ball(.16), rho: 2500, fr: .7, re: .25, vol: .017, r: .16, area: .08, tint: 0x8d8a86, ccd: true },
+  };
+  const tkey = (kx, kz) => kx + ',' + kz, rr = (a, b) => a + (b - a) * Math.random(), pick = a => a[Math.floor(Math.random() * a.length)];
+
+  async function init(sc) { scene = sc; const t0 = performance.now();
+    try { const m = await import(URL); R = m.default || m; await R.init(); world = new R.World({ x: 0, y: -9.81, z: 0 }); world.timestep = H;
+      for (const k in KIND) { const K = KIND[k], im = new THREE.InstancedMesh(K.geo(), std(0xffffff, k === 'barrel' ? .5 : 0, k === 'barrel' ? .45 : .85), K.n); im.count = 0; im.frustumCulled = false; im.castShadow = im.receiveShadow = true; im.setColorAt(0, _c.set(K.tint)); scene.add(im); K.im = im; K.used = 0; }
+      statics(); ready = true; G.tick.push((t, dt) => step(dt)); G.info.phys = { engine: 'rapier ' + (R.version ? R.version() : ''), ms: Math.round(performance.now() - t0) };
+    } catch (e) { G.info.phys = { off: String(e && e.message || e) }; console.warn('physics engine not loaded; the world runs without it', e); }
+    return ready; }
+
+  // ---- what stands still: trunks and boulders, sorted into 90 m cells and only made solid near the focus ----
+  function statics() { const put = (x, z, it) => { const k = tkey(Math.floor(x / 90), Math.floor(z / 90)); let c = cells.get(k); if (!c) cells.set(k, c = { x: (Math.floor(x / 90) + .5) * 90, z: (Math.floor(z / 90) + .5) * 90, items: [], cols: null }); c.items.push(it); };
+    if (Island.FOREST) for (const c of Island.FOREST.list) for (const L of c.t) for (const t of L) put(t[0], t[2], [0, t[0], t[1], t[2], .2 * t[4], 3.2 * t[5]]);
+    if (Island.ROCKS) for (const r of Island.ROCKS) put(r[0], r[2], [1, r[0], r[1], r[2], r[3], r[4]]); }
+  function cellOn(c) { c.cols = c.items.map(it => world.createCollider(it[0] === 0 ? R.ColliderDesc.cylinder(it[5], it[4]).setTranslation(it[1], it[2] + it[5], it[3]).setFriction(.6)
+    : R.ColliderDesc.ball(.86 * Math.cbrt(it[4] * it[4] * it[5] * .72)).setTranslation(it[1], it[2], it[3]).setFriction(.8))); }
+  function cellOff(c) { for (const col of c.cols) world.removeCollider(col, false); c.cols = null; }
+
+  // ---- the ground: one triangle mesh per 32 m tile, sampled from the same height function the eye and the wheels use ----
+  function tileOn(kx, kz) { const k = tkey(kx, kz); if (tiles.has(k)) return; const n = TS + 1, v = new Float32Array(n * n * 3), ix = new Uint32Array(TS * TS * 6); let o = 0;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const x = kx * TS + i, z = kz * TS + j; v[o++] = x; v[o++] = Island.surf(x, z)[0]; v[o++] = z; }
+    o = 0; for (let j = 0; j < TS; j++) for (let i = 0; i < TS; i++) { const a = j * n + i, b = a + 1, c = a + n, d = c + 1; ix[o++] = a; ix[o++] = c; ix[o++] = b; ix[o++] = b; ix[o++] = c; ix[o++] = d; }
+    tiles.set(k, world.createCollider(R.ColliderDesc.trimesh(v, ix).setFriction(.9))); }
+  function prime(x, z, rad = 1) { if (!ready) return; const kx = Math.floor(x / TS), kz = Math.floor(z / TS); for (let a = -rad; a <= rad; a++) for (let b = -rad; b <= rad; b++) tileOn(kx + a, kz + b); }
+  function stream() { const kx = Math.floor(focus.x / TS), kz = Math.floor(focus.z / TS);
+    if (!queue.length) for (let r = 0; r <= 3; r++) for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) if (Math.max(Math.abs(a), Math.abs(b)) === r && !tiles.has(tkey(kx + a, kz + b))) queue.push([kx + a, kz + b]);
+    if (queue.length) { const t = queue.shift(); if (Math.max(Math.abs(t[0] - kx), Math.abs(t[1] - kz)) <= 4) tileOn(t[0], t[1]); }
+    for (const [k, col] of tiles) { const s = k.split(','); if (Math.max(Math.abs(+s[0] - kx), Math.abs(+s[1] - kz)) > 5) { world.removeCollider(col, false); tiles.delete(k); } }
+    for (const c of cells.values()) { const d = Math.hypot(c.x - focus.x, c.z - focus.z); if (!c.cols && d < 150) cellOn(c); else if (c.cols && d > 230) cellOff(c); } }
+
+  // ---- loose things ----
+  function spawn(kind, x, y, z, o = {}) { if (!ready) return null; const K = KIND[kind]; if (!K || K.used >= K.n) return null;
+    const bd = R.RigidBodyDesc.dynamic().setTranslation(x, y, z).setAngularDamping(.25).setLinearDamping(.02); if (o.q) bd.setRotation(o.q); if (o.v) bd.setLinvel(o.v.x, o.v.y, o.v.z); if (K.ccd) bd.setCcdEnabled(true);
+    const b = world.createRigidBody(bd); world.createCollider(K.col(R.ColliderDesc).setDensity(K.rho).setFriction(K.fr).setRestitution(K.re), b);
+    const e = { b, kind, i: K.used++, vol: K.vol, r: K.r, area: K.area, on: true, wet: 0 }; K.im.count = K.used; K.im.setColorAt(e.i, _c.set(o.color === undefined ? K.tint : o.color)); if (K.im.instanceColor) K.im.instanceColor.needsUpdate = true;
+    bodies.push(e); show(e); return e; }
+  // a body another module made and draws itself (the car): it gets the sea, the wind and the blasts like everything else
+  function adopt(b, o) { const e = { b, kind: null, vol: o.vol, r: o.r, area: o.area || 0, on: true, manual: true, wet: 0, lift: o.lift || null }; bodies.push(e); return e; }
+  function show(e) { const K = KIND[e.kind], t = e.b.translation(), q = e.b.rotation(); _m.compose(_p.set(t.x, t.y, t.z), _q.set(q.x, q.y, q.z, q.w), _s.set(1, 1, 1)); K.im.setMatrixAt(e.i, _m); K.im.instanceMatrix.needsUpdate = true; }
+
+  // ---- what the environment does to a body, each step: the sea carries and slows it, the storm pushes it ----
+  function forces(h) { for (const e of bodies) { if (!e.on || e.b.isSleeping() && !e.wet && wind.lengthSq() < 9) continue; const b = e.b, t = b.translation(), sea = SEA + .12 * Math.sin(G.t * 1.1 + t.x * .21 + t.z * .17);
+      const sub = clamp((sea - (t.y - e.r)) / (2 * e.r)); e.wet = sub;
+      if (sub > 0) { const m = b.mass(), v = b.linvel(), w = b.angvel(), up = e.vol * 1000 * 9.81 * sub * h; _v.x = -v.x * m * Math.min(1, 1.6 * sub * h); _v.y = up - v.y * m * Math.min(1, 3.2 * sub * h); _v.z = -v.z * m * Math.min(1, 1.6 * sub * h);
+        if (e.lift) { const q = b.rotation(); _d.set(e.lift[0], e.lift[1], e.lift[2]).applyQuaternion(_q.set(q.x, q.y, q.z, q.w)); _f.set(t.x + _d.x, t.y + _d.y, t.z + _d.z); b.applyImpulseAtPoint(_v, _f, true); } else b.applyImpulse(_v, true);      // lifted from above its centre, a hull rights itself
+        const k = 1 - Math.min(1, 2.2 * sub * h); _v.x = w.x * k; _v.y = w.y * k; _v.z = w.z * k; b.setAngvel(_v, true); }
+      else if (e.area && wind.lengthSq() > 9) { const v = b.linvel(); _d.set(wind.x - v.x, 0, wind.z - v.z); const k = .5 * 1.2 * 1.1 * e.area * _d.length() * h; _v.x = _d.x * k; _v.y = 0; _v.z = _d.z * k; b.applyImpulse(_v, true); } } }
+  // a blast: an impulse falling off with distance, on everything loose within reach; and a short flash to see it by
+  function blast(x, y, z, power = 900, rad = 9) { if (!ready) return 0; let n = 0;
+    for (const e of bodies) { if (!e.on) continue; const t = e.b.translation(); _d.set(t.x - x, t.y - y + .5, t.z - z); const d = _d.length(); if (d > rad) continue; const m = e.b.mass(), J = Math.min(power * (1 - d / rad), m * 22); _d.multiplyScalar(J / Math.max(d, .2));
+      _v.x = _d.x; _v.y = _d.y; _v.z = _d.z; e.b.applyImpulse(_v, true); _v.x = rr(-1, 1) * J * .05; _v.y = rr(-1, 1) * J * .05; _v.z = rr(-1, 1) * J * .05; e.b.applyTorqueImpulse(_v, true); n++; }
+    const fl = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12), new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: .8, depthWrite: false, blending: THREE.AdditiveBlending })); fl.position.set(x, y, z); scene.add(fl); blasts.push({ m: fl, t: 0, rad });
+    thump(1); return n; }
+  function thump(k) { const S = G.snd; if (!S || !S.ac || !S.out) return; const ac = S.ac, n = ac.sampleRate * .5 | 0, bf = ac.createBuffer(1, n, ac.sampleRate), d = bf.getChannelData(0); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);
+    const s = ac.createBufferSource(), lp = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = bf; lp.type = 'lowpass'; lp.frequency.value = 160 + 500 * k; g.gain.value = Math.min(.5, .3 * k); s.connect(lp); lp.connect(g); g.connect(S.out); s.start(); }
+  function ray(o, d, max = 200) { if (!ready) return null; const hit = world.castRay(new R.Ray(o, d), max, true); if (!hit) return null; const t = hit.timeOfImpact !== undefined ? hit.timeOfImpact : hit.toi; return { t, x: o.x + d.x * t, y: o.y + d.y * t, z: o.z + d.z * t }; }
+
+  // ---- one frame: stream the solid world to the focus, then as many fixed steps as the frame's time holds ----
+  function step(dt) { if (!ready) return; const car = G.drive && typeof Drive !== 'undefined' ? Drive.car : null; focus.copy(car ? car.p : G.camera.position); stream();
+    const te = G.tEnv === undefined ? G.t : G.tEnv, st = (.3 * sm(17.5, 24, te) + .7 * sm(24, 31, te)) * (1 - sm(67.7, 70.2, te)); wind.set(-.8, 0, .6).multiplyScalar(4 + 22 * st);
+    for (const e of bodies) { if (e.manual) continue; const t = e.b.translation(), has = tiles.has(tkey(Math.floor(t.x / TS), Math.floor(t.z / TS))) && t.y > -40; if (has !== e.on) { e.on = has; e.b.setEnabled(has); } }
+    for (let i = blasts.length - 1; i >= 0; i--) { const B = blasts[i]; B.t += dt; const k = B.t / .45; if (k >= 1) { scene.remove(B.m); B.m.geometry.dispose(); B.m.material.dispose(); blasts.splice(i, 1); } else { B.m.scale.setScalar(B.rad * .75 * Math.sqrt(k)); B.m.material.opacity = .8 * (1 - k) * (1 - k); } }
+    if (hold) return; acc = Math.min(acc + dt, .06); const t0 = performance.now(); let n = 0;
+    while (acc >= H) { acc -= H; for (const f of pre) f(H); forces(H); world.step(); n++; } steps = n; stepMs += (performance.now() - t0 - stepMs) * .05;
+    for (const e of bodies) if (e.kind && e.on && !e.b.isSleeping()) show(e); }
+
+  // ---- things to do with it from any mode: F throws a stone, G sets down a hive crate, X sets off a blast where you look ----
+  function aim() { const cam = G.camera; cam.getWorldDirection(_d); return { o: { x: cam.position.x, y: cam.position.y, z: cam.position.z }, d: { x: _d.x, y: _d.y, z: _d.z } }; }
+  addEventListener('keydown', e => { if (!ready || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return; const c = e.code; if (c !== 'KeyF' && c !== 'KeyG' && c !== 'KeyX') return; const a = aim(); prime(a.o.x, a.o.z);
+    if (c === 'KeyF') spawn('stone', a.o.x + a.d.x * 1.2, a.o.y + a.d.y * 1.2 - .1, a.o.z + a.d.z * 1.2, { v: { x: a.d.x * 24, y: a.d.y * 24 + 3, z: a.d.z * 24 } });
+    else if (c === 'KeyG') { const x = a.o.x + a.d.x * 9, z = a.o.z + a.d.z * 9; prime(x, z, 0); spawn('crate', x, Math.max(Island.surf(x, z)[0], SEA) + 2.2, z, { color: pick([0xd9c592, 0xcdb37a, 0xe6d6a6]) }); }
+    else { const h = ray(a.o, a.d, 160); if (h) blast(h.x, h.y + .3, h.z); else blast(a.o.x + a.d.x * 20, a.o.y + a.d.y * 20, a.o.z + a.d.z * 20); } });
+
+  return { init, step, spawn, adopt, blast, ray, prime, thump, pre, KIND, bodies, wind, H, SEA,
+    get ready() { return ready; }, get R() { return R; }, get world() { return world; }, get hold() { return hold; }, set hold(v) { hold = v; },
+    get stats() { return { bodies: bodies.length, awake: bodies.filter(e => e.on && !e.b.isSleeping()).length, tiles: tiles.size, cells: [...cells.values()].filter(c => c.cols).length, steps, stepMs: +stepMs.toFixed(2) }; } };
+})();
+
 // ===== 86_ambient.js =====
 
 // ---- tour: the sound of the place, synthesised in the page (Web Audio; no file, no music). Sea wash, wind, gulls, rain, thunder.
@@ -8414,18 +8512,36 @@ const Ambient = (() => {
 //      Around it, the frame of a game: input (keyboard and gamepad), a chase camera, lap timing, a pause menu, a readout, engine sound. ----
 const Drive = (() => {
   const RD = Island.RD, V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), YAX = V(0, 1, 0);
-  const M = 980, IX = 1450, IY = 1650, IZ = 520, RAD = .3, REST = .3, TRAV = .17, KS = 27000, CS = 2900, G9 = 9.81;
+  const COMY = -.26, M = 980, IX = 1450, IY = 1650, IZ = 520, RAD = .3, REST = .3, TRAV = .17, KS = 27000, CS = 2900, G9 = 9.81;
   const WL = [[.74, -.18, 1.22], [-.74, -.18, 1.22], [.74, -.18, -1.18], [-.74, -.18, -1.18]].map(a => V(...a));      // +X is the car's left, +Z its nose
   const MU = [1.05, .78, .62, .5], RR = [14, 70, 110, 190], GEAR = [0, 3.55, 2.05, 1.42, 1.08, .86], FINAL = 3.9, REV = 3.4;
   const car = { p: V(), q: new THREE.Quaternion(), v: V(), w: V(), comp: [0, 0, 0, 0], len: [.2, .2, .2, .2], spin: [0, 0, 0, 0], steer: 0, gear: 1, rpm: 900, slip: 0, thr: 0, air: 0, surf: 0, bad: 0 };
   const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, keys = new Set(), gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
   const bx = V(), by = V(), bz = V(), F = V(), Tq = V(), A = V(), C = V(), r = V(), vC = V(), wf = V(), ws = V(), nrm = V(), f = V(), tmp = V(), camP = V(), dir = V(), tgt = V(), dq = new THREE.Quaternion(), mm = new THREE.Matrix4(), QY = new THREE.Quaternion().setFromAxisAngle(YAX, Math.PI);
+  let body = null, hitT = 0; const vPrev = V(), cm = V(), _i = { x: 0, y: 0, z: 0 };
   let grp = null, wheels = [], on = false, paused = false, camMode = 0, hud, menu, lapT = 0, lapOn = false, last = 0, best = 0, prog = 0, lastI = 0, camInit = false, snd = null, drive = 0, brake = 0, shiftT = 0, wet = 0, pad = [false, false, false];
   try { best = +localStorage.getItem('oneworld.bestLap') || 0; } catch (e) {}
   const fmt = s => s ? Math.floor(s / 60) + ':' + (s % 60).toFixed(2).padStart(5, '0') : '-:--.--';
 
   function reset(i) { const n = RD.n; i = ((i % n) + n) % n; const j = (i + 1) % n;
-    car.p.set(RD.px[i], RD.py[i] + .08 + .7, RD.pz[i]); car.q.setFromAxisAngle(YAX, Math.atan2(RD.px[j] - RD.px[i], RD.pz[j] - RD.pz[i])); car.v.set(0, 0, 0); car.w.set(0, 0, 0); car.comp.fill(.09); car.gear = 1; car.bad = 0; car.steer = 0; camInit = false; lastI = i; }
+    car.p.set(RD.px[i], RD.py[i] + .08 + .7, RD.pz[i]); car.q.setFromAxisAngle(YAX, Math.atan2(RD.px[j] - RD.px[i], RD.pz[j] - RD.pz[i])); car.v.set(0, 0, 0); car.w.set(0, 0, 0); car.comp.fill(.09); car.gear = 1; car.bad = 0; car.steer = 0; camInit = false; lastI = i; vPrev.set(0, 0, 0);
+    if (body) { Phys.prime(car.p.x, car.p.z); body.setTranslation(car.p, true); body.setRotation(car.q, true); body.setLinvel({ x: 0, y: 0, z: 0 }, true); body.setAngvel({ x: 0, y: 0, z: 0 }, true); } }
+  const pull = () => { const t = body.translation(), q = body.rotation(), v = body.linvel(), w = body.angvel(); car.p.set(t.x, t.y, t.z); car.q.set(q.x, q.y, q.z, q.w); car.v.set(v.x, v.y, v.z); car.w.set(w.x, w.y, w.z); };
+  // the car as a body in the world's physics: mass, a low centre of mass, inertia, and a hull that can hit things. The wheels stay ours:
+  // each step their spring and tyre forces go in as impulses, and the solver does the rest (contacts, tumbling, what it knocks over).
+  function embody() { const R = Phys.R, w = Phys.world;
+    body = w.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(car.p.x, car.p.y, car.p.z).setRotation(car.q).setCanSleep(false).setCcdEnabled(true).setAngularDamping(.3).setAdditionalMassProperties(M, { x: 0, y: COMY, z: 0 }, { x: IX, y: IY, z: IZ }, { x: 0, y: 0, z: 0, w: 1 }));
+    const col = d => w.createCollider(d.setDensity(0).setFriction(.35).setRestitution(.12), body); col(R.ColliderDesc.roundCuboid(.72, .23, 1.82, .08).setTranslation(0, -.09, 0)); col(R.ColliderDesc.cuboid(.68, .27, 1.1).setTranslation(0, .5, -.36));
+    body.setEnabled(false); Phys.adopt(body, { vol: 2.4, r: .55, lift: [0, .5, 0] }); Phys.pre.push(h => { if (on && !paused) sub(h); });
+    // what stands along the course, loose: cones on the edge line, barrels and stacks of hive crates on the shoulder, one wall of crates across half the lane
+    const n = RD.n, at = (i, off, along = 0) => { i = ((i % n) + n) % n; const j = (i + 1) % n; let tx = RD.px[j] - RD.px[i], tz = RD.pz[j] - RD.pz[i]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l; const x = RD.px[i] - tz * off + tx * along, z = RD.pz[i] + tx * off + tz * along; return [x, Island.surf(x, z)[0] + .03, z, new THREE.Quaternion().setFromAxisAngle(YAX, Math.atan2(tx, tz))]; };
+    for (let i = 30, k = 0; i < n - 30; i += 22, k++) { const side = k & 1 ? 1 : -1;
+      if (k % 3 === 0) for (let c = 0; c < 4; c++) { const p = at(i + c * 3, side * 3.15); Phys.spawn('cone', p[0], p[1] + .35, p[2]); }
+      else if (k % 3 === 1) for (let c = 0; c < 3; c++) { const p = at(i, side * 4.15, c * .72); Phys.spawn('barrel', p[0], p[1] + .44, p[2], { color: c & 1 ? 0xb5332d : 0x2d6fb5 }); }
+      else for (let lv = 0; lv < 3; lv++) for (let c = 0; c < 3 - lv; c++) { const p = at(i, side * 4.1, (c - (2 - lv) / 2) * .63); Phys.spawn('crate', p[0], p[1] + .25 + lv * .5, p[2], { q: p[3], color: [0xd9c592, 0xcdb37a, 0xe6d6a6][(c + lv) % 3] }); } }
+    for (let lv = 0; lv < 3; lv++) for (let c = 0; c < 4; c++) { const p = at(160, .5 + c * .63 + (lv & 1) * .1); Phys.spawn('crate', p[0], p[1] + .25 + lv * .5, p[2], { q: p[3], color: [0xd9c592, 0xcdb37a, 0xe6d6a6][(c + lv) % 3] }); }
+  }
+
   function build(scene) {
     const std = (c, m, ro, o = {}) => new THREE.MeshStandardMaterial({ color: c, metalness: m, roughness: ro, envMapIntensity: 1.1, ...o });
     const paint = std(0xf2b632, .25, .32), glass = std(0x0b0f13, .6, .08), trim = std(0x151515, .1, .7), tire = std(0x0b0b0c, 0, .92), rim = std(0x9aa0a6, .9, .3), wax = std(0xe9d9a8, 0, .8),
@@ -8443,8 +8559,8 @@ const Drive = (() => {
     grp.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     hud = document.createElement('div'); hud.style.cssText = 'position:fixed;right:18px;bottom:16px;text-align:right;font:700 13px/1.35 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;text-shadow:0 1px 8px rgba(0,0,0,.8);z-index:5;pointer-events:none;display:none;font-variant-numeric:tabular-nums;white-space:pre'; document.body.appendChild(hud);
     menu = document.createElement('div'); menu.style.cssText = 'position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(6,5,3,.72);z-index:7;font:600 15px/1.9 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;text-align:center;white-space:pre';
-    menu.textContent = '일시정지\n\nW / ↑  가속      S / ↓  브레이크·후진\nA D / ← →  조향      Space  핸드브레이크\nC  카메라      V  뒤 보기      R  도로로 복귀\n\n게임패드: RT 가속 · LT 브레이크 · 왼쪽 스틱 조향 · A 핸드브레이크 · Y 카메라 · X 복귀\n\nEsc  계속하기'; document.body.appendChild(menu);
-    reset(RD.n - 6);
+    menu.textContent = '일시정지\n\nW / ↑  가속      S / ↓  브레이크·후진\nA D / ← →  조향      Space  핸드브레이크\nC  카메라      V  뒤 보기      R  도로로 복귀\nF  돌 던지기      G  벌통 상자 놓기      X  폭발\n\n게임패드: RT 가속 · LT 브레이크 · 왼쪽 스틱 조향 · A 핸드브레이크 · Y 카메라 · X 복귀\n\nEsc  계속하기'; document.body.appendChild(menu);
+    reset(RD.n - 6); if (typeof Phys !== 'undefined' && Phys.ready) { embody(); reset(RD.n - 6); }
   }
   function readInput() {
     let acc = keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0, brk = keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0, st = (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) - (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0), hb = keys.has('Space') ? 1 : 0, look = keys.has('KeyV');
@@ -8454,7 +8570,7 @@ const Drive = (() => {
     inp.acc = acc; inp.brk = brk; inp.st = st; inp.hb = hb; inp.look = look;
   }
   const back = () => { const o = Island.nearRoad(car.p.x, car.p.z); reset(o.d < 1e8 ? o.i : lastI); };
-  function setPaused(v) { paused = v; menu.style.display = v ? 'flex' : 'none'; }
+  function setPaused(v) { paused = v; if (body) Phys.hold = v; menu.style.display = v ? 'flex' : 'none'; }
   function control(dt) {
     const vf = car.v.dot(bz), spd = Math.abs(vf), lim = Math.min(.56, 31 / Math.max(spd * spd, 1)); car.steer += (inp.st * lim - car.steer) * (1 - Math.exp(-dt * (Math.abs(inp.st) > .05 ? 6 : 9)));      // the faster it goes, the less lock it is given
     let thr = inp.acc, brk = inp.brk; if (car.gear > 0) { if (vf < .8 && brk > .1 && thr < .1) car.gear = -1; } else if (vf > -.8 && thr > .1 && brk < .1) car.gear = 1;
@@ -8465,19 +8581,21 @@ const Drive = (() => {
     const tq = 168 * (1 - Math.pow((car.rpm - 4300) / 5400, 2)) * thr * (car.rpm > 6850 ? 0 : 1) * (shiftT > .2 ? 0 : 1); drive = tq * ratio * .9 / RAD; brake = brk * 9500; car.thr = thr;
   }
   function sub(h) {
-    const q = car.q; bx.set(1, 0, 0).applyQuaternion(q); by.set(0, 1, 0).applyQuaternion(q); bz.set(0, 0, 1).applyQuaternion(q); F.set(0, -M * G9, 0); Tq.set(0, 0, 0); let slip = 0, air = 0;
+    if (body) pull(); const q = car.q; bx.set(1, 0, 0).applyQuaternion(q); by.set(0, 1, 0).applyQuaternion(q); bz.set(0, 0, 1).applyQuaternion(q); F.set(0, body ? 0 : -M * G9, 0); cm.copy(car.p).addScaledVector(by, body ? COMY : 0); Tq.set(0, 0, 0); let slip = 0, air = 0;
     for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z);
       const gy = g[0] + g[1] * (A.x - g[3]) + g[2] * (A.z - g[4]), len = (A.y - gy - RAD) / Math.max(by.y, .35); car.len[i] = clamp(len, REST - TRAV - .04, REST + .06);
       if (len > REST) { car.comp[i] = 0; air++; continue; }
       const c = Math.min(REST - len, TRAV + .08); let Fz = KS * c + CS * (c - car.comp[i]) / h; if (c > TRAV) Fz += 90000 * (c - TRAV); car.comp[i] = c; if (Fz <= 0) continue; Fz = Math.min(Fz, 4 * M * G9);
-      nrm.set(-g[1], 1, -g[2]).normalize(); C.copy(A).addScaledVector(by, -(len + RAD)); r.subVectors(C, car.p); vC.copy(car.w).cross(r).add(car.v);
+      nrm.set(-g[1], 1, -g[2]).normalize(); C.copy(A).addScaledVector(by, -(len + RAD)); r.subVectors(C, cm); vC.copy(car.w).cross(r).add(car.v);
       const st = i < 2 ? car.steer : 0; wf.copy(bz).multiplyScalar(Math.cos(st)).addScaledVector(bx, Math.sin(st)); wf.addScaledVector(nrm, -wf.dot(nrm)).normalize(); ws.crossVectors(nrm, wf);
       const vl = vC.dot(wf), vs = vC.dot(ws), mu = MU[g[5]] * (g[5] === 0 ? 1 - .2 * wet : 1) * (i > 1 && inp.hb > .5 ? .55 : 1), al = Math.atan2(vs, Math.abs(vl) + 1.2);
       let Fy = -mu * Fz * Math.sin(1.5 * Math.atan(9 * al)), Fx = (i < 2 ? drive * .5 : 0) - clamp(vl * 6, -1, 1) * (brake * (i < 2 ? .31 : .19) + (i > 1 ? inp.hb * 2600 : 0)) - vl * RR[g[5]];
       const mag = Math.hypot(Fx, Fy), mx = mu * Fz; if (mag > mx) { Fx *= mx / mag; Fy *= mx / mag; }
       slip += Math.min(1, Math.abs(al) * 3 + (mag > mx ? .3 : 0)) * Math.min(1, Math.abs(vl) / 6 + Math.abs(vs) / 3);
-      f.copy(nrm).multiplyScalar(Fz).addScaledVector(wf, Fx).addScaledVector(ws, Fy); F.add(f); r.y *= .45; Tq.add(tmp.crossVectors(r, f)); car.spin[i] += vl / RAD * h; }
-    F.addScaledVector(car.v, -.42 * car.v.length()); car.v.addScaledVector(F, h / M);
+      f.copy(nrm).multiplyScalar(Fz).addScaledVector(wf, Fx).addScaledVector(ws, Fy); F.add(f); if (!body) r.y *= .45; Tq.add(tmp.crossVectors(r, f)); car.spin[i] += vl / RAD * h; }
+    F.addScaledVector(car.v, -.42 * car.v.length());
+    if (body) { _i.x = F.x * h; _i.y = F.y * h; _i.z = F.z * h; body.applyImpulse(_i, true); _i.x = Tq.x * h; _i.y = Tq.y * h; _i.z = Tq.z * h; body.applyTorqueImpulse(_i, true); car.slip = slip / 4; car.air = air; return; }
+    car.v.addScaledVector(F, h / M);
     let wx = car.w.dot(bx) + Tq.dot(bx) / IX * h, wy = car.w.dot(by) + Tq.dot(by) / IY * h, wz = car.w.dot(bz) + Tq.dot(bz) / IZ * h; const dmp = 1 - h * (air === 4 ? .2 : 1.2); wx *= dmp; wz *= 1 - h * (air === 4 ? .2 : 2.6); wy *= 1 - h * .4;
     car.w.set(0, 0, 0).addScaledVector(bx, wx).addScaledVector(by, wy).addScaledVector(bz, wz); car.p.addScaledVector(car.v, h);
     dq.set(car.w.x * h * .5, car.w.y * h * .5, car.w.z * h * .5, 0).multiply(q); q.x += dq.x; q.y += dq.y; q.z += dq.z; q.w += dq.w; q.normalize(); car.slip = slip / 4; car.air = air;
@@ -8497,11 +8615,12 @@ const Drive = (() => {
   function step(camera, dt) {
     if (!grp) return ''; readInput();
     if (!paused) { const te = G.tEnv === undefined ? G.t : G.tEnv; wet = sm(31.2, 36, te) * (1 - sm(68, 76, te));
-      bx.set(1, 0, 0).applyQuaternion(car.q); by.set(0, 1, 0).applyQuaternion(car.q); bz.set(0, 0, 1).applyQuaternion(car.q); control(dt);
+      if (body) pull(); bx.set(1, 0, 0).applyQuaternion(car.q); by.set(0, 1, 0).applyQuaternion(car.q); bz.set(0, 0, 1).applyQuaternion(car.q); control(dt);
       for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z); const s0 = Island.surf(A.x, A.z), y0 = s0[0], ty = s0[1];
         g[0] = y0; g[1] = (Island.surf(A.x + .4, A.z)[0] - y0) / .4; g[2] = (Island.surf(A.x, A.z + .4)[0] - y0) / .4; g[3] = A.x; g[4] = A.z; g[5] = ty; if (i === 0) car.surf = ty; }
-      const n = clamp(Math.ceil(dt * 240), 1, 12), h = dt / n; for (let i = 0; i < n; i++) sub(h); laps(dt);
-      car.bad = by.y < .3 || car.p.y < -1.2 ? car.bad + dt : 0; if (car.bad > 1.6 || !isFinite(car.p.x) || car.p.y < -6) back(); }
+      if (!body) { const n = clamp(Math.ceil(dt * 240), 1, 12), h = dt / n; for (let i = 0; i < n; i++) sub(h); } laps(dt);
+      if (body) { hitT -= dt; const dv = tmp.copy(car.v).sub(vPrev).length(); vPrev.copy(car.v); if (dv > 2.2 && hitT <= 0) { Phys.thump(Math.min(1, dv / 9)); hitT = .22; } }      // a jolt in the velocity is a hit: let it be heard
+      const sunk = car.p.y < .6 && Island.surf(car.p.x, car.p.z)[0] < -.6; car.bad = by.y < .3 || (!body && car.p.y < -1.2) ? car.bad + dt : sunk ? car.bad + dt * .4 : 0; if (car.bad > 1.6 || !isFinite(car.p.x) || car.p.y < -6) back(); }
     grp.position.copy(car.p); grp.quaternion.copy(car.q); wheels.forEach((w, i) => { w.position.set(WL[i].x, WL[i].y - car.len[i], WL[i].z); w.rotation.set(car.spin[i], i < 2 ? car.steer : 0, 0); });
     const sp = car.v.length(), sgn = inp.look ? -1 : 1; dir.copy(bz); dir.y = 0; if (sp > 4) dir.lerp(tmp.copy(car.v).setY(0).normalize(), .35); dir.normalize();
     if (camMode === 2) { camera.position.copy(car.p).addScaledVector(by, .64).addScaledVector(bz, .3); camera.quaternion.copy(car.q).multiply(QY); if (inp.look) camera.quaternion.multiply(QY); }
@@ -8512,13 +8631,13 @@ const Drive = (() => {
     hud.textContent = `${fmt(lapOn ? lapT : 0)}   이번 바퀴\n${fmt(last)}   지난 바퀴\n${fmt(best)}   최고 기록\n\n${bar}\n${car.gear < 0 ? 'R' : car.gear}단   ${String(kmh).padStart(3, ' ')} km/h` + (car.off > 9 ? '\nR  도로로 복귀' : '');
     sound(); return ['아스팔트', '갓길', '풀밭', '모래'][car.surf] + (wet > .3 ? ' · 젖음' : '') + ' · C 카메라 · Esc 조작법';
   }
-  function enter() { on = true; grp.visible = true; hud.style.display = ''; keys.clear(); camInit = false; }
-  function leave() { on = false; hud.style.display = 'none'; setPaused(false); keys.clear(); sound(); }
+  function enter() { on = true; grp.visible = true; if (body) { body.setEnabled(true); Phys.prime(car.p.x, car.p.z); } hud.style.display = ''; keys.clear(); camInit = false; }
+  function leave() { on = false; if (body) { body.setEnabled(false); Phys.hold = false; } hud.style.display = 'none'; setPaused(false); keys.clear(); sound(); }
   addEventListener('keydown', e => { if (!on || e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code);
     if (e.code === 'KeyC' && !e.repeat) { camMode = (camMode + 1) % 3; camInit = false; } else if (e.code === 'KeyR' && !e.repeat) back(); else if (e.code === 'Escape') setPaused(!paused);
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); });
   addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
-  return { build, step, enter, leave, reset, car, get on() { return on; } };
+  return { build, step, enter, leave, reset, car, inp, keys, get on() { return on; }, get body() { return body; } };
 })();
 
 // ===== 88_film.js =====
@@ -8886,6 +9005,7 @@ const Walk = (() => {
   if (typeof Rock !== 'undefined') add('raising the sea fort', 14, async prog => { await Rock.build(scene, prog, tick); });
   if (typeof Island !== 'undefined') add('raising the island', 16, async prog => { await Island.build(scene, prog, tick); });
   if (typeof Garden !== 'undefined') add('planting the garden', 10, async prog => { await Garden.build(scene, prog, tick); });
+  if (typeof Phys !== 'undefined') add('waking the physics', 3, async prog => { await Phys.init(scene); prog(1); });
   if (typeof Drive !== 'undefined') add('rolling out the car', 1, async prog => { Drive.build(scene); prog(1); });
   if (typeof Arch !== 'undefined') add('building the red halls', 8, async prog => { await Arch.build(scene, prog, tick); });
   if (typeof Flora !== 'undefined') add('growing maples and pines', 14, async prog => { await Flora.build(scene, prog, tick); });

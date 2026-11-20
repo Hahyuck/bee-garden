@@ -83,6 +83,7 @@
   if (typeof Rock !== 'undefined') add('raising the sea fort', 14, async prog => { await Rock.build(scene, prog, tick); });
   if (typeof Island !== 'undefined') add('raising the island', 16, async prog => { await Island.build(scene, prog, tick); });
   if (typeof Garden !== 'undefined') add('planting the garden', 10, async prog => { await Garden.build(scene, prog, tick); });
+  if (typeof Phys !== 'undefined') add('waking the physics', 3, async prog => { await Phys.init(scene); prog(1); });
   if (typeof Drive !== 'undefined') add('rolling out the car', 1, async prog => { Drive.build(scene); prog(1); });
   if (typeof Arch !== 'undefined') add('building the red halls', 8, async prog => { await Arch.build(scene, prog, tick); });
   if (typeof Flora !== 'undefined') add('growing maples and pines', 14, async prog => { await Flora.build(scene, prog, tick); });

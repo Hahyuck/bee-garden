@@ -207,6 +207,7 @@ vec3 isGround(){
 
   // ---- the forest in three stages by distance: full boughs near, plain tiers further off, a drawn outline far away;
   //      and within a few metres, sprays of needles on the bough ends of the nearest trees ----
+  const ROCKS = [];      // boulders big enough to stop something: the physics makes them solid
   const FOREST = { list: [], cells: new Map(), sprays: null, last: new THREE.Vector3(1e9, 0, 0), P: null };
   function addTree(x, y, z, larch, s) { const kx = Math.floor(x / 90), kz = Math.floor(z / 90), k = kx + ',' + kz; let c = FOREST.cells.get(k);
     if (!c) { c = { x: (kx + .5) * 90, z: (kz + .5) * 90, t: [[], []], m: [[], []], lod: -1 }; FOREST.cells.set(k, c); FOREST.list.push(c); }
@@ -242,7 +243,7 @@ vec3 isGround(){
     const P = { near: [conifer(false, 15, 18, true, .34, 3), conifer(true, 13, 18, true, .34, 3)], mid: [conifer(false, 8, 10), conifer(true, 7, 10)], far: [outline(), outline()],
       tuft: [tuft(.36, 14), tuft(.3, 14), tuft(.42, 13)], bil: [bilberry(), bilberry()], fern: [fern(), fern()], rock: [0, 1, 2, 3].map(i => K.tag(K.blob(i * 7.3 + 1, .3, 14, 10), '#ffffff', 7, K.M([0, 0, 0], [0, 0, 0], [1, .72, 1]))),
       log: K.merge([K.tag(K.tube([V(-2.2, .16, 0), V(0, .2, .1), V(2.2, .14, 0)], t => .17 - .05 * t, 7), '#b8ab98', 4), K.tag(K.tube([V(.6, .2, 0), V(.9, .5, .3), V(1.1, .9, .4)], t => .05 - .03 * t, 4), '#b8ab98', 4)]) };
-    const B = K.buckets(grp, 60);
+    const B = K.buckets(grp, 60); { const put0 = B.put; B.put = (key, geo, mat, x, y, z, rot, s, sy, col, ...more) => { if (key[0] === 'r' && s >= .45) ROCKS.push([x, y, z, s, sy === undefined ? s : sy]); return put0.call(B, key, geo, mat, x, y, z, rot, s, sy, col, ...more); }; }
     // forest: trees everywhere under the treeline, larches as it nears
     const cell = LOW ? 9 : 6.5; for (let x = IC.x - 520; x < IC.x + 520; x += cell) for (let z = IC.z - 520; z < IC.z + 520; z += cell) { const px = x + rr(0, cell), pz = z + rr(0, cell), h = H0(px, pz); if (h < 9 || h > tlAt(px, pz) || R() > .86) continue;
       if (Math.hypot(px - GP.x, pz - GP.z) < 24 || nearTrail(px, pz).d < 5.5 || nearRoad(px, pz).d < 9) continue; const g = grad(px, pz); if (Math.hypot(g[0], g[1]) > 1.0) continue;
@@ -268,5 +269,5 @@ vec3 isGround(){
     G.tick.push(() => { followGrass(G.camera.position); followForest(G.camera.position); }); followGrass(V(GP.x, 0, GP.z)); while (tileQ.length) followGrass(V(GP.x, 0, GP.z)); followForest(V(GP.x, 0, GP.z));
     G.info.island = { trail: T.n, road: RD.len, summit: [Math.round(SUMMIT.x), Math.round(SUMMIT.y), Math.round(SUMMIT.z)], ms: Math.round(performance.now() - t0) }; prog(1);
   }
-  return { build, H0, ground, surf, nearTrail, nearRoad, RD, T, SUMMIT, GP, IC, TREELINE, MEADOW };
+  return { build, H0, ground, surf, nearTrail, nearRoad, RD, T, SUMMIT, GP, IC, TREELINE, MEADOW, FOREST, ROCKS };
 })();
