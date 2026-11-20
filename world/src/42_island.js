@@ -70,12 +70,15 @@ vec3 rdSurface(){
   // standing water in the low patches; more of it, and a wet sheen everywhere, when it rains
   float pud=smoothstep(.64-.3*uWetR,.74-.3*uWetR,vnoise(q*.11+5.)*.7+vnoise(q*.37)*.3)*(1.-sh)*(1.-pm*.5);
   col=mix(col,col*.45,pud*.8+uWetR*.35*(1.-sh)); rdRo=mix(rdRo,.05,pud); rdRo=mix(rdRo,.28,uWetR*.6*(1.-sh)*(1.-pud)); rdHt*=1.-pud;
+  // the cold: ice whitens the puddles and glazes the rest; snow lies over it all, thinner on the line the tyres keep clear
+  float ice=uWx.y*(.3+.7*pud)*(.7+.3*vnoise(q*2.3)); col=mix(col,vec3(.62,.72,.8),ice*.55); rdRo=mix(rdRo,.07,uWx.y*.85);
+  float sc=wxCover(vRw,1.)*(1.-.75*rub*(1.-smoothstep(.75,1.,uWx.x))); col=mix(col,vec3(.86,.89,.94)*(.92+.08*agg),sc); rdRo=mix(rdRo,.72,sc); rdHt=mix(rdHt,.012*vnoise(q*1.7),sc);
   return col; }`;
   const RU = { uWetR: { value: 0 } };
   function roadMat() { const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .8, metalness: 0, envMapIntensity: 1 });
     patch(m, s => { s.sh.uniforms.uWetR = RU.uWetR; s.vHead('attribute vec3 aRd; varying vec3 vRd, vRw;');
       s.v('#include <begin_vertex>', '#include <begin_vertex>\n  vRd = aRd; vRw = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-      s.fHead(GLSL_NOISE + ROADF); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = rdSurface();');
+      s.fHead(GLSL_NOISE + GLSL_WX + ROADF); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = rdSurface();');
       s.f('#include <roughnessmap_fragment>', 'float roughnessFactor = rdRo;');
       s.f('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 sp = -vViewPosition, sx = dFdx(sp), sy = dFdy(sp), r1 = cross(sy, normal), r2 = cross(normal, sx); float det = dot(sx, r1), fw = max(length(sx), length(sy));\n    vec3 gr = sign(det) * (dFdx(rdHt) * r1 + dFdy(rdHt) * r2); normal = normalize(abs(det) * normal - gr * (1.0 - smoothstep(0.004, 0.06, fw))); }'); }, 'road');
     return m; }
@@ -144,11 +147,15 @@ vec3 isGround(){
   alb=mix(alb,sand,beach); isHt=mix(isHt,.012*rip*(1.-wet)+.03*peb,beach); isRo=mix(isRo,mix(.9,.3,wet),beach);
   vec2 vp=isVor(q*7.5+n2*2.); float st=smoothstep(.36,.24,vp.x)*step(.45,vp.y)*near; vec3 dirt=mix(vec3(.25,.19,.13),vec3(.36,.3,.22),n2)*(.8+.4*n3);
   dirt=mix(dirt,mix(vec3(.3,.29,.28),vec3(.46,.44,.41),fract(vp.y*7.)),st*.75); float pth=smoothstep(.2,.7,vIp);
-  isHt=mix(isHt,.02*st+.012*n3,pth); return mix(alb,dirt,pth); }`;
+  isHt=mix(isHt,.02*st+.012*n3,pth); vec3 o=mix(alb,dirt,pth);
+  float wg=uWx.z*(1.-beach*wet); o*=mix(1.,mix(.66,.5,pth),wg); isRo=mix(isRo,mix(.5,.22,pth),wg*.85);                         // wet earth is darker and shines; the path turns to mud
+  float fr=uWx.y*(.55+.45*n3); o=mix(o,vec3(.7,.78,.86),fr*.4); isRo=mix(isRo,.3,uWx.y*.6);                                   // hoar frost and glaze
+  float sc=wxCover(vIw,1.-sl)*(1.-.9*smoothstep(.9,.1,alt)); o=mix(o,vec3(.87,.9,.95)*(.9+.1*n2),sc); isRo=mix(isRo,.7,sc); isHt=mix(isHt,.03*n2+.01*n3,sc);     // the sea keeps the water's edge clear
+  return o; }`;
   function groundMat() { const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .95, metalness: 0, envMapIntensity: .5 });
     patch(m, s => { s.vHead('attribute float aPath; varying vec3 vIw, vIn; varying float vIp;');
       s.v('#include <begin_vertex>', '#include <begin_vertex>\n  vIw = (modelMatrix * vec4(transformed, 1.0)).xyz; vIn = normalize(mat3(modelMatrix) * normal); vIp = aPath;');
-      s.fHead(GLSL_NOISE + FRAG); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = isGround();');
+      s.fHead(GLSL_NOISE + GLSL_WX + FRAG); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = isGround();');
       s.f('#include <roughnessmap_fragment>', 'float roughnessFactor = isRo;');
       // relief from the procedural height, by screen-space derivatives; it fades out where a pixel is wider than the relief
       s.f('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 sp = -vViewPosition, sx = dFdx(sp), sy = dFdy(sp), r1 = cross(sy, normal), r2 = cross(normal, sx); float det = dot(sx, r1), fw = max(length(sx), length(sy));\n    vec3 gr = sign(det) * (dFdx(isHt) * r1 + dFdy(isHt) * r2); normal = normalize(abs(det) * normal - gr * (1.0 - smoothstep(0.03, 0.25, fw))); }'); }, 'island');
@@ -238,7 +245,7 @@ vec3 isGround(){
     prog(.3); await tick();
     grp.add(ribbon(gm)); grp.add(roadMesh(roadMat()));
     grp.add(gridMesh(GP.x - 30, GP.z - 30, 60, 200, (x, z) => H0(x, z) + .14 + micro(x, z) * sm(11, 22, Math.hypot(x - GP.x, z - GP.z)), gm, true)); prog(.45); await tick();
-    G.tick.push(() => { const te = G.tEnv === undefined ? G.t : G.tEnv; RU.uWetR.value = sm(31.2, 36, te) * (1 - sm(68, 76, te)); });
+    G.tick.push(() => { const te = G.tEnv === undefined ? G.t : G.tEnv; RU.uWetR.value = typeof Weather !== 'undefined' ? Weather.S.wet : sm(31.2, 36, te) * (1 - sm(68, 76, te)); });
     const mTree = FXKit.mat({ sway: [.02, 10] }), mGrass = FXKit.mat({ sway: [.22, .3] }), mShrub = FXKit.mat({ sway: [.06, .4] }), mStill = FXKit.mat();
     const P = { near: [conifer(false, 15, 18, true, .34, 3), conifer(true, 13, 18, true, .34, 3)], mid: [conifer(false, 8, 10), conifer(true, 7, 10)], far: [outline(), outline()],
       tuft: [tuft(.36, 14), tuft(.3, 14), tuft(.42, 13)], bil: [bilberry(), bilberry()], fern: [fern(), fern()], rock: [0, 1, 2, 3].map(i => K.tag(K.blob(i * 7.3 + 1, .3, 14, 10), '#ffffff', 7, K.M([0, 0, 0], [0, 0, 0], [1, .72, 1]))),

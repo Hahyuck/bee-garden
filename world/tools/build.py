@@ -51,3 +51,9 @@ out = shell.replace("{{THREE}}", three).replace("{{APP}}", joined)
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 tmp = OUT + ".tmp"; open(tmp, "w").write(out); os.replace(tmp, OUT)
 print(f"built {os.path.relpath(OUT, ROOT)} {len(out)/1024:.0f} KB ({len(app)} modules)")
+if not WS:
+    names = [os.path.basename(f) for f in sorted(glob.glob(os.path.join(SRC, "*.js")))]
+    loader = ("import('./vendor/three.module.min.js').then(async T => { window.THREE = T; for (const f of " + repr(names) + ") await new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'src/' + f + '?' + Date.now(); s.onload = ok; s.onerror = () => no(new Error('could not load ' + f)); document.head.appendChild(s); }); });")
+    open(os.path.join(ROOT, "dev.html"), "w", encoding="utf-8").write(shell.replace("<script>{{THREE}}</script>", "").replace("{{APP}}", loader))
+    open(os.path.join(ROOT, "index.html"), "w", encoding="utf-8").write(out)
+    print(f"wrote index.html (one file, for release) and dev.html (loads src/*.js one by one, for editing)")

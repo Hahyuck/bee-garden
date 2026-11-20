@@ -5,9 +5,9 @@
 //      Around it, the frame of a game: input (keyboard and gamepad), a chase camera, lap timing, a pause menu, a readout, engine sound. ----
 const Drive = (() => {
   const RD = Island.RD, V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), YAX = V(0, 1, 0);
-  const COMY = -.26, M = 980, IX = 1450, IY = 1650, IZ = 520, RAD = .3, REST = .3, TRAV = .17, KS = 27000, CS = 2900, G9 = 9.81;
+  const CC = CFG.car, COMY = CC.comY, M = CC.mass, IX = CC.inertia[0], IY = CC.inertia[1], IZ = CC.inertia[2], RAD = CC.wheelRadius, REST = CC.springRest, TRAV = CC.springTravel, KS = CC.spring, CS = CC.damper, G9 = 9.81;
   const WL = [[.74, -.18, 1.22], [-.74, -.18, 1.22], [.74, -.18, -1.18], [-.74, -.18, -1.18]].map(a => V(...a));      // +X is the car's left, +Z its nose
-  const MU = [1.05, .78, .62, .5], RR = [14, 70, 110, 190], GEAR = [0, 3.55, 2.05, 1.42, 1.08, .86], FINAL = 3.9, REV = 3.4;
+  const MU = CC.grip, RR = CC.rolling, GEAR = CC.gears, FINAL = CC.finalDrive, REV = CC.reverse; let snowK = 0, iceK = 0;
   const car = { p: V(), q: new THREE.Quaternion(), v: V(), w: V(), comp: [0, 0, 0, 0], len: [.2, .2, .2, .2], spin: [0, 0, 0, 0], steer: 0, gear: 1, rpm: 900, slip: 0, thr: 0, air: 0, surf: 0, bad: 0 };
   const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, keys = new Set(), gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
   const bx = V(), by = V(), bz = V(), F = V(), Tq = V(), A = V(), C = V(), r = V(), vC = V(), wf = V(), ws = V(), nrm = V(), f = V(), tmp = V(), camP = V(), dir = V(), tgt = V(), dq = new THREE.Quaternion(), mm = new THREE.Matrix4(), QY = new THREE.Quaternion().setFromAxisAngle(YAX, Math.PI);
@@ -65,13 +65,13 @@ const Drive = (() => {
   const back = () => { const o = Island.nearRoad(car.p.x, car.p.z); reset(o.d < 1e8 ? o.i : lastI); };
   function setPaused(v) { paused = v; if (body) Phys.hold = v; menu.style.display = v ? 'flex' : 'none'; }
   function control(dt) {
-    const vf = car.v.dot(bz), spd = Math.abs(vf), lim = Math.min(.56, 31 / Math.max(spd * spd, 1)); car.steer += (inp.st * lim - car.steer) * (1 - Math.exp(-dt * (Math.abs(inp.st) > .05 ? 6 : 9)));      // the faster it goes, the less lock it is given
+    const vf = car.v.dot(bz), spd = Math.abs(vf), lim = Math.min(CC.steerLock, CC.steerSpeedK / Math.max(spd * spd, 1)); car.steer += (inp.st * lim - car.steer) * (1 - Math.exp(-dt * (Math.abs(inp.st) > .05 ? 6 : 9)));      // the faster it goes, the less lock it is given
     let thr = inp.acc, brk = inp.brk; if (car.gear > 0) { if (vf < .8 && brk > .1 && thr < .1) car.gear = -1; } else if (vf > -.8 && thr > .1 && brk < .1) car.gear = 1;
     if (car.gear < 0) { const t = thr; thr = brk; brk = t; }
     const ratio = (car.gear < 0 ? -REV : GEAR[car.gear]) * FINAL; let rpm = Math.max(spd / RAD * Math.abs(ratio) * 9.549, 900 + thr * 2200 * (1 - sm(0, 4, spd)));
     shiftT -= dt; if (car.gear > 0 && shiftT <= 0) { if (rpm > 6100 && car.gear < 5) { car.gear++; shiftT = .35; } else if (rpm < 2500 && car.gear > 1) { car.gear--; shiftT = .35; } }
     car.rpm += (Math.min(rpm, 7000) - car.rpm) * (1 - Math.exp(-dt * 12));
-    const tq = 168 * (1 - Math.pow((car.rpm - 4300) / 5400, 2)) * thr * (car.rpm > 6850 ? 0 : 1) * (shiftT > .2 ? 0 : 1); drive = tq * ratio * .9 / RAD; brake = brk * 9500; car.thr = thr;
+    const tq = CC.torque * (1 - Math.pow((car.rpm - 4300) / 5400, 2)) * thr * (car.rpm > 6850 ? 0 : 1) * (shiftT > .2 ? 0 : 1); drive = tq * ratio * .9 / RAD; brake = brk * CC.brake; car.thr = thr;
   }
   function sub(h) {
     if (body) pull(); const q = car.q; bx.set(1, 0, 0).applyQuaternion(q); by.set(0, 1, 0).applyQuaternion(q); bz.set(0, 0, 1).applyQuaternion(q); F.set(0, body ? 0 : -M * G9, 0); cm.copy(car.p).addScaledVector(by, body ? COMY : 0); Tq.set(0, 0, 0); let slip = 0, air = 0;
@@ -81,12 +81,12 @@ const Drive = (() => {
       const c = Math.min(REST - len, TRAV + .08); let Fz = KS * c + CS * (c - car.comp[i]) / h; if (c > TRAV) Fz += 90000 * (c - TRAV); car.comp[i] = c; if (Fz <= 0) continue; Fz = Math.min(Fz, 4 * M * G9);
       nrm.set(-g[1], 1, -g[2]).normalize(); C.copy(A).addScaledVector(by, -(len + RAD)); r.subVectors(C, cm); vC.copy(car.w).cross(r).add(car.v);
       const st = i < 2 ? car.steer : 0; wf.copy(bz).multiplyScalar(Math.cos(st)).addScaledVector(bx, Math.sin(st)); wf.addScaledVector(nrm, -wf.dot(nrm)).normalize(); ws.crossVectors(nrm, wf);
-      const vl = vC.dot(wf), vs = vC.dot(ws), mu = MU[g[5]] * (g[5] === 0 ? 1 - .2 * wet : 1) * (i > 1 && inp.hb > .5 ? .55 : 1), al = Math.atan2(vs, Math.abs(vl) + 1.2);
-      let Fy = -mu * Fz * Math.sin(1.5 * Math.atan(9 * al)), Fx = (i < 2 ? drive * .5 : 0) - clamp(vl * 6, -1, 1) * (brake * (i < 2 ? .31 : .19) + (i > 1 ? inp.hb * 2600 : 0)) - vl * RR[g[5]];
+      const vl = vC.dot(wf), vs = vC.dot(ws), mu = Math.max(.1, MU[g[5]] * (g[5] === 0 ? 1 - CC.wetGripLoss * wet - CC.iceGripLoss * iceK : 1 - .3 * iceK) * (1 - CC.snowGripLoss * snowK)) * (i > 1 && inp.hb > .5 ? .55 : 1), al = Math.atan2(vs, Math.abs(vl) + 1.2);
+      let Fy = -mu * Fz * Math.sin(1.5 * Math.atan(9 * al)), Fx = (i < 2 ? drive * .5 : 0) - clamp(vl * 6, -1, 1) * (brake * (i < 2 ? .31 : .19) + (i > 1 ? inp.hb * 2600 : 0)) - vl * (RR[g[5]] + CC.snowRolling * snowK);
       const mag = Math.hypot(Fx, Fy), mx = mu * Fz; if (mag > mx) { Fx *= mx / mag; Fy *= mx / mag; }
       slip += Math.min(1, Math.abs(al) * 3 + (mag > mx ? .3 : 0)) * Math.min(1, Math.abs(vl) / 6 + Math.abs(vs) / 3);
       f.copy(nrm).multiplyScalar(Fz).addScaledVector(wf, Fx).addScaledVector(ws, Fy); F.add(f); if (!body) r.y *= .45; Tq.add(tmp.crossVectors(r, f)); car.spin[i] += vl / RAD * h; }
-    F.addScaledVector(car.v, -.42 * car.v.length());
+    F.addScaledVector(car.v, -CC.drag * car.v.length());
     if (body) { _i.x = F.x * h; _i.y = F.y * h; _i.z = F.z * h; body.applyImpulse(_i, true); _i.x = Tq.x * h; _i.y = Tq.y * h; _i.z = Tq.z * h; body.applyTorqueImpulse(_i, true); car.slip = slip / 4; car.air = air; return; }
     car.v.addScaledVector(F, h / M);
     let wx = car.w.dot(bx) + Tq.dot(bx) / IX * h, wy = car.w.dot(by) + Tq.dot(by) / IY * h, wz = car.w.dot(bz) + Tq.dot(bz) / IZ * h; const dmp = 1 - h * (air === 4 ? .2 : 1.2); wx *= dmp; wz *= 1 - h * (air === 4 ? .2 : 2.6); wy *= 1 - h * .4;
@@ -107,7 +107,7 @@ const Drive = (() => {
   // one frame: input, physics in small steps, the car's model, the camera, the readout. Returns a line for the mode readout.
   function step(camera, dt) {
     if (!grp) return ''; readInput();
-    if (!paused) { const te = G.tEnv === undefined ? G.t : G.tEnv; wet = sm(31.2, 36, te) * (1 - sm(68, 76, te));
+    if (!paused) { const te = G.tEnv === undefined ? G.t : G.tEnv; wet = sm(31.2, 36, te) * (1 - sm(68, 76, te)); if (typeof Weather !== 'undefined') { wet = Weather.S.wet; snowK = Weather.S.cover; iceK = Weather.S.ice; }
       if (body) pull(); bx.set(1, 0, 0).applyQuaternion(car.q); by.set(0, 1, 0).applyQuaternion(car.q); bz.set(0, 0, 1).applyQuaternion(car.q); control(dt);
       for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z); const s0 = Island.surf(A.x, A.z), y0 = s0[0], ty = s0[1];
         g[0] = y0; g[1] = (Island.surf(A.x + .4, A.z)[0] - y0) / .4; g[2] = (Island.surf(A.x, A.z + .4)[0] - y0) / .4; g[3] = A.x; g[4] = A.z; g[5] = ty; if (i === 0) car.surf = ty; }
@@ -122,7 +122,7 @@ const Drive = (() => {
     camera.fov = lerp(58, 74, sm(0, 45, sp)); camera.near = .3;
     const kmh = Math.round(sp * 3.6), bar = '▮'.repeat(Math.round(clamp(car.rpm / 7000) * 14)).padEnd(14, '▯');
     hud.textContent = `${fmt(lapOn ? lapT : 0)}   이번 바퀴\n${fmt(last)}   지난 바퀴\n${fmt(best)}   최고 기록\n\n${bar}\n${car.gear < 0 ? 'R' : car.gear}단   ${String(kmh).padStart(3, ' ')} km/h` + (car.off > 9 ? '\nR  도로로 복귀' : '');
-    sound(); return ['아스팔트', '갓길', '풀밭', '모래'][car.surf] + (wet > .3 ? ' · 젖음' : '') + ' · C 카메라 · Esc 조작법';
+    sound(); return ['아스팔트', '갓길', '풀밭', '모래'][car.surf] + (iceK > .3 ? ' · 빙판' : snowK > .3 ? ' · 눈길' : wet > .3 ? ' · 젖음' : '') + ' · C 카메라 · Esc 조작법';
   }
   function enter() { on = true; grp.visible = true; if (body) { body.setEnabled(true); Phys.prime(car.p.x, car.p.z); } hud.style.display = ''; keys.clear(); camInit = false; }
   function leave() { on = false; if (body) { body.setEnabled(false); Phys.hold = false; } hud.style.display = 'none'; setPaused(false); keys.clear(); sound(); }

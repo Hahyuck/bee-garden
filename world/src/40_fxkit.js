@@ -125,8 +125,8 @@ vec3 fxSurface(vec3 alb){
   #endif
   { vec3 fxO = fxMM[3].xyz, fxW = (fxMM * vec4(transformed, 1.0)).xyz; vH = max(fxW.y - fxO.y, 0.0); vWp = fxW;
     mat3 fxR = mat3(fxMM); transformed += (clWind(fxO, uSway.x * vH * vH / (vH + uSway.y)) * fxR) / dot(fxR[0], fxR[0]); }`);
-      s.fHead(GLSL_NOISE + FRAG);
-      s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = fxSurface(diffuseColor.rgb);');
+      s.fHead(GLSL_NOISE + (typeof GLSL_WX !== 'undefined' ? GLSL_WX : 'uniform vec4 uWx; float wxCover(vec3 a, float b){ return 0.; }') + FRAG);
+      s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = fxSurface(diffuseColor.rgb);\n  { float fxNy = dot(normalize(vNormal), normalize(mat3(viewMatrix) * vec3(0., 1., 0.))), fxSc = wxCover(vWp, .45 + .55 * max(fxNy, 0.)); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.87, .9, .95), fxSc * .92); fxRough = mix(fxRough, .7, fxSc); fxTrans *= 1. - .8 * fxSc; diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.72, .8, .88), uWx.y * .3); }');
       s.f('#include <roughnessmap_fragment>', 'float roughnessFactor = fxRough;');
       // light through thin things: what the far side receives from the sun shows on this side, tinted by the leaf
       s.f('#include <emissivemap_fragment>', `#include <emissivemap_fragment>

@@ -336,7 +336,7 @@ THREE.Material.prototype.onBeforeCompile = function (sh) { Daylight.feed(sh.unif
 // patch helper: m.onBeforeCompile with ordered string replacements; shares time/wind uniforms
 function patch(mat, fn, key) {
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uTime = G.uTime; sh.uniforms.uWind = G.uWind; sh.uniforms.uGust = G.uGust; Daylight.feed(sh.uniforms);
+    sh.uniforms.uTime = G.uTime; sh.uniforms.uWind = G.uWind; sh.uniforms.uGust = G.uGust; if (G.uWx) sh.uniforms.uWx = G.uWx; Daylight.feed(sh.uniforms);
     const api = {
       sh,
       v: (a, b) => { if (!sh.vertexShader.includes(a)) console.warn('patch miss (v)', key, a); sh.vertexShader = sh.vertexShader.replace(a, b); },

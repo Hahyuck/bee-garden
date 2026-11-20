@@ -35,7 +35,7 @@
   const sc = sun.shadow.camera; if (G.tour) { sc.left = -310; sc.right = 310; sc.top = 310; sc.bottom = -310; } else { sc.left = -150; sc.right = 150; sc.top = 170; sc.bottom = -170; } sc.near = 20; sc.far = 1100; sc.updateProjectionMatrix();
   sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.00035; sun.shadow.normalBias = 0.22; sun.shadow.radius = 2.4;
   G.sun = sun;
-  const hemi = new THREE.HemisphereLight(new THREE.Color(0.40, 0.47, 0.74), new THREE.Color(0.44, 0.31, 0.24), 1.15); scene.add(hemi);
+  const hemi = new THREE.HemisphereLight(new THREE.Color(0.40, 0.47, 0.74), new THREE.Color(0.44, 0.31, 0.24), 1.15); scene.add(hemi); G.hemi = hemi;
   const ENV0 = 0.45, FILLK = Q.has('fillk') ? +Q.get('fillk') : 0.0;       // the storm's cut of the fill is local (clFill in the light chunk); a global one would dim the loongs flying above it
   function dayFill(L) {
     const e = L.dusk, c = L.cool, g = L.gloom;
@@ -83,6 +83,7 @@
   if (typeof Rock !== 'undefined') add('raising the sea fort', 14, async prog => { await Rock.build(scene, prog, tick); });
   if (typeof Island !== 'undefined') add('raising the island', 16, async prog => { await Island.build(scene, prog, tick); });
   if (typeof Garden !== 'undefined') add('planting the garden', 10, async prog => { await Garden.build(scene, prog, tick); });
+  if (typeof Weather !== 'undefined') add('reading the weather', 1, async prog => { Weather.build(scene); prog(1); });
   if (typeof Phys !== 'undefined') add('waking the physics', 3, async prog => { await Phys.init(scene); prog(1); });
   if (typeof Drive !== 'undefined') add('rolling out the car', 1, async prog => { Drive.build(scene); prog(1); });
   if (typeof Arch !== 'undefined') add('building the red halls', 8, async prog => { await Arch.build(scene, prog, tick); });
