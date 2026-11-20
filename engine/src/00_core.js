@@ -28,7 +28,7 @@ const NZ = (() => {
 })();
 
 // what every module can see. U holds the uniforms of the light and the air, fed to every material that is compiled.
-const G = { t: 0, tAbs: 0, day: 10, look: { shadows: true, air: true, bounce: true, field: true, shafts: true, bloom: true, adapt: true, film: true },      // look: the parts of the lighting, each of which can be switched off to compare
+const G = { t: 0, tAbs: 0, day: 10, look: { shadows: true, contact: true, air: true, bounce: true, field: true, surface: true, shafts: true, bloom: true, adapt: true, film: true },      // look: the parts of the lighting, each of which can be switched off to compare
   uTime: { value: 0 }, uGust: { value: 0 }, uWind: { value: 0 }, tick: [], info: {},
   U: { uSunDir: { value: new THREE.Vector3(.4, .8, .45).normalize() }, uSunK: { value: new THREE.Vector3(1, 1, 1) }, uFogCol: { value: new THREE.Vector3(.62, .72, .85) }, uFogP: { value: new THREE.Vector4(.0004, .012, 0, 1) }, uFogM: { value: new THREE.Vector2(0, .25) } } };
 

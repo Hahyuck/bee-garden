@@ -53,7 +53,7 @@ void main(){ vec2 uv = vUv;
   col = pow(max(col, 0.), vec3(1. / 2.2)); col += (hash12(gl_FragCoord.xy + fract(uTime * 3.17) * 517.) - .5) * uGrain * uFilm; gl_FragColor = vec4(col, 1.); }`;
   const heatP = [{ p: new THREE.Vector3(), k: 0 }, { p: new THREE.Vector3(), k: 0 }], _s = new THREE.Vector3();
   let fA, fB, focusOn = false;
-  let R, quad, qcam, qscene, rtMain, rtDof, b1a, b1b, b2a, b2b, W = 0, H = 0, exp = C.exposure;
+  let R, quad, qcam, qscene, rtMain, rtDof, rtLens, b1a, b1b, b2a, b2b, W = 0, H = 0, exp = C.exposure;
   // a mode sets these each frame. aperture 0: no depth of field. focus 0: autofocus on the middle of the frame. fisheye: the wide stereographic lens
   // (the mode must also give the camera the wider field it needs: camera.fov = Post.fisheyeFov(aspect)). eye: the compound-eye view, 0..1
   const lens = { focus: 10, aperture: 0, fisheye: false, eye: 0 };
@@ -62,6 +62,11 @@ void main(){ vec2 uv = vUv;
   const mat = (fs, u) => new THREE.ShaderMaterial({ vertexShader: VS, fragmentShader: fs, uniforms: u, depthTest: false, depthWrite: false });
   const M = {};
   function build(renderer) { R = renderer; qcam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1); qscene = new THREE.Scene(); quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); quad.frustumCulled = false; qscene.add(quad);
+    M.contact = mat(GLSL_CONTACT, {
+      tColor: { value: null }, tDepth: { value: null }, uClip: { value: new THREE.Vector2() },
+      uInvFocal: { value: new THREE.Vector2() }, uResolution: { value: new THREE.Vector2() },
+      uRadius: { value: C.contactRadius }, uStrength: { value: C.contactStrength }
+    });
     M.dof = mat(DOF, { tC: { value: null }, tD: { value: null }, uRes: { value: new THREE.Vector2() }, uNear: { value: .3 }, uFar: { value: 1 }, uFocus: { value: 1 }, uApK: { value: 0 }, uMaxC: { value: 14 }, uStep: { value: 1.1 }, uJit: { value: 0 }, tF: { value: null }, uK: { value: 1 }, uT: { value: 1 }, uAspect: { value: 1 }, uFish: { value: 0 } });
     M.focus = mat(FOCUS, { tD: { value: null }, tP: { value: null }, uNear: { value: .3 }, uFar: { value: 1 }, uRate: { value: 1 }, uAspect: { value: 1 } });
     fA = new THREE.WebGLRenderTarget(1, 1, { type: THREE.FloatType, depthBuffer: false, magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter }); fB = fA.clone();
@@ -69,18 +74,31 @@ void main(){ vec2 uv = vUv;
     M.fin = mat(FINAL, { tC: { value: null }, tB1: { value: null }, tB2: { value: null }, uExp: { value: 1 }, uTime: G.uTime, uAspect: { value: 1 }, uVig: { value: C.vignette }, uGrain: { value: C.grain }, uBloom: { value: C.bloom }, uFringe: { value: C.fringe }, uFilm: { value: 1 }, uEye: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, tD: { value: null }, uShafts: { value: 0 }, uSunScr: { value: new THREE.Vector2() }, uShaftCol: { value: new THREE.Vector3() }, uHeat: { value: [new THREE.Vector3(), new THREE.Vector3()] } }); }
   // heat(world position, strength): the air shimmers there for a second or two
   function heat(p, k) { const h = heatP[0].k <= heatP[1].k ? heatP[0] : heatP[1]; h.p.copy(p); h.k = k; }
-  function size() { const s = R.getDrawingBufferSize(new THREE.Vector2()), w = Math.max(8, s.x), h = Math.max(8, s.y); if (rtMain && w === W && h === H) return; W = w; H = h; for (const t of [rtMain, rtDof, b1a, b1b, b2a, b2b]) if (t) t.dispose();
+  function size() { const s = R.getDrawingBufferSize(new THREE.Vector2()), w = Math.max(8, s.x), h = Math.max(8, s.y); if (rtMain && w === W && h === H) return; W = w; H = h; for (const t of [rtMain, rtDof, rtLens, b1a, b1b, b2a, b2b]) if (t) t.dispose();
+    rtLens = null;
     const hf = { type: THREE.HalfFloatType, depthBuffer: false };
     rtMain = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, samples: LOW ? 0 : 4, depthTexture: new THREE.DepthTexture(W, H) }); rtDof = new THREE.WebGLRenderTarget(W, H, hf);
     b1a = new THREE.WebGLRenderTarget(W >> 2, H >> 2, hf); b1b = b1a.clone(); b2a = new THREE.WebGLRenderTarget(W >> 3, H >> 3, hf); b2b = b2a.clone(); }
   const pass = (m, to) => { quad.material = m; R.setRenderTarget(to); R.render(qscene, qcam); };
   function render(scene, camera, dt) { size(); R.setRenderTarget(rtMain); R.render(scene, camera); let src = rtMain;
+    if (G.look.contact) {
+      const u = M.contact.uniforms, projection = camera.projectionMatrix.elements;
+      u.tColor.value = src.texture; u.tDepth.value = rtMain.depthTexture;
+      u.uClip.value.set(camera.near, camera.far); u.uInvFocal.value.set(1 / projection[0], 1 / projection[5]);
+      u.uResolution.value.set(W, H); u.uRadius.value = C.contactRadius; u.uStrength.value = C.contactStrength;
+      pass(M.contact, rtDof); src = rtDof;
+    }
     if (lens.aperture > 0 || lens.fisheye) { const u = M.dof.uniforms, asp = W / H, ref = Math.min(H, W * 9 / 16) / 1080;      // sizes are in pixels of a 1080-line frame, as in the Bee Garden
       if (!(lens.focus > 0)) { const f = M.focus.uniforms; f.tD.value = rtMain.depthTexture; f.tP.value = fA.texture; f.uNear.value = camera.near; f.uFar.value = camera.far; f.uAspect.value = asp; f.uRate.value = focusOn ? 1 - Math.exp(-(dt || .016) * 5) : 1; pass(M.focus, fB); const t = fA; fA = fB; fB = t; focusOn = true; } else focusOn = false;
-      u.tC.value = rtMain.texture; u.tD.value = rtMain.depthTexture; u.tF.value = fA.texture; u.uRes.value.set(W, H); u.uNear.value = camera.near; u.uFar.value = camera.far; u.uFocus.value = lens.focus > 0 ? lens.focus : 0;
-      u.uApK.value = lens.aperture * ref; u.uMaxC.value = 24 * ref; u.uStep.value = (LOW ? 7 : 3.4) * ref; u.uJit.value = G.t; u.uK.value = fishK(asp); u.uT.value = fishT(asp); u.uAspect.value = asp; u.uFish.value = lens.fisheye ? 1 : 0; pass(M.dof, rtDof); src = rtDof; } else focusOn = false;
+      if (src === rtDof && !rtLens) rtLens = rtDof.clone();
+      const lensTarget = src === rtDof ? rtLens : rtDof;
+      u.tC.value = src.texture; u.tD.value = rtMain.depthTexture; u.tF.value = fA.texture; u.uRes.value.set(W, H); u.uNear.value = camera.near; u.uFar.value = camera.far; u.uFocus.value = lens.focus > 0 ? lens.focus : 0;
+      u.uApK.value = lens.aperture * ref; u.uMaxC.value = 24 * ref; u.uStep.value = (LOW ? 7 : 3.4) * ref; u.uJit.value = G.t; u.uK.value = fishK(asp); u.uT.value = fishT(asp); u.uAspect.value = asp; u.uFish.value = lens.fisheye ? 1 : 0; pass(M.dof, lensTarget); src = lensTarget; } else focusOn = false;
     // exposure follows the light slowly, as an eye does: open at night, stopped down at noon
-    const day = G.hemi ? clamp(G.hemi.intensity / CFG.sky.fillIntensity) : 1, want = C.exposure * lerp(C.nightGain, 1, sm(.08, .7, day)) * (1 - C.snowStop * (typeof Weather !== 'undefined' ? Weather.S.cover : 0) * day);      // and stopped down again over snow if (G.look.adapt) exp += (want - exp) * (1 - Math.exp(-(dt || .016) / 1.5)); else exp = C.exposure;
+    const day = G.hemi ? clamp(G.hemi.intensity / CFG.sky.fillIntensity) : 1;
+    const want = C.exposure * lerp(C.nightGain, 1, sm(.08, .7, day)) * (1 - C.snowStop * (typeof Weather !== 'undefined' ? Weather.S.cover : 0) * day);
+    exp = G.look.adapt ? lerp(exp, want, 1 - Math.exp(-Math.max(0, dt ?? .016) / 1.5)) : C.exposure;
+    G.info.exposure = exp;
     M.bright.uniforms.tC.value = src.texture; M.bright.uniforms.uPx.value.set(1 / W, 1 / H); M.bright.uniforms.uExp.value = exp; pass(M.bright, b1a);
     const bl = (from, to, x, y) => { M.blur.uniforms.tC.value = from.texture; M.blur.uniforms.uDir.value.set(x, y); pass(M.blur, to); };
     bl(b1a, b1b, 1 / b1a.width, 0); bl(b1b, b1a, 0, 1 / b1a.height); bl(b1a, b2b, 1 / b2a.width, 0); bl(b2b, b2a, 0, 1 / b2a.height);

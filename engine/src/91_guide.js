@@ -13,6 +13,7 @@ const Guide = (() => {
     { t: '2. 세계 바꾸기', lead: '시각, 날씨, 빛은 모두 값 하나로 바뀌고, 세계의 나머지(땅의 색, 접지력, 안개, 소리)가 그 값을 따라갑니다.', ex: [
       { t: '눈 내리게 하기', d: '기온이 내려가고 눈이 쌓이기 시작합니다. 20초쯤 지나면 땅이 덮입니다. 키로는 7.', code: "Weather.set('snow');", run: 1 },
       { t: '비와 폭풍', d: '구름이 덮이고 바람이 세지며, 흙이 젖고 도로가 미끄러워집니다. 키로는 6.', code: "Weather.set('rain');", run: 1 },
+      { t: '비 갠 뒤 해안 도로', d: '해안 굽잇길을 낮게 바라봅니다. L 패널에서 젖은 노면을 누르면 바퀴 자국에 반사되는 하늘을 비교할 수 있습니다.', code: "Modes.set('free');\nModes.fly.p.set(-415.647, 12.942, -139.209);\nModes.fly.yaw = 1.593;\nModes.fly.pitch = -.232;\nG.day = 16.6;\nWeather.set('clear');\nWeather.S.wet = .95;\nWeather.S.pooled = .91;", run: 1 },
       { t: '맑은 날로', d: '눈이 녹으면서 땅을 적십니다. 키로는 5.', code: "Weather.set('clear');", run: 1 },
       { t: '해질녘으로', d: 'G.day가 시각(0~24)입니다. 키로는 [ 와 ], T는 시간 멈춤.', code: 'G.day = 17.6;', run: 1 },
       { t: '한밤으로', d: '달이 해를 이어받고, 노출이 천천히 열립니다.', code: 'G.day = 23;', run: 1 },

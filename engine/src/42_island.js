@@ -41,8 +41,58 @@ const Island = (() => {
     RD.n = n; RD.len = n * 2; }
   // what a wheel finds under it: [height, surface] (0 asphalt, 1 gravel shoulder, 2 grass and earth, 3 sand)
   function surf(x, z) { const r = nearRoad(x, z); if (r.d <= 3.5) return [r.y + .08 - .012 * r.d, 0]; if (r.d < 4.6) return [lerp(r.y + .04, r.y - .02, (r.d - 3.5) / 1.1), 1]; const y = ground(x, z); return [y, y < 3.2 ? 3 : 2]; }
+  const wetState = { value: new THREE.Vector4(0, 0, 1, CFG.surface.rippleRange) };
+  const waterShader = /* glsl */`
+uniform float uTime; uniform vec4 uStandingWater;
+varying float vDrain;
+float wetPool, wetFilm;
+// The low path samples the same sky colours and primary light but skips cloud noise and drop rings.
+${LOW ? 'uniform vec3 uSkySun, uSkyK, uZen, uHor; uniform vec4 uSkyP;' : GLSL_SKY}
+float fillBasin(float bed, float slopeGate){
+  float level=uStandingWater.x;
+  float edge=max(.045, min(.15, fwidth(bed)));
+  return smoothstep(.035,.20,level)*smoothstep(1.-level*.39-edge,1.-level*.39+edge,bed)*slopeGate*uStandingWater.z;
+}
+vec3 poolNormal(vec3 surfaceNormal, vec3 wp, float footprint){
+  vec2 slope=vec2(0.);
+  ${LOW ? '' : `float nearRing=(1.-smoothstep(uStandingWater.w*.55,uStandingWater.w,length(wp-cameraPosition)))*(1.-smoothstep(.018,.07,footprint));
+  if(wetPool*nearRing*uStandingWater.y>.003){
+    vec2 uv=wp.xz*1.32, cell=floor(uv), delta=fract(uv)-(.34+.32*hash22(cell));
+    float d=length(delta), age=fract(uTime*(.76+.30*hash21(cell+8.))+hash21(cell+3.));
+    float r=(d-.029-.285*age)*34., inner=r+1.55;
+    float ridge=r*exp(-r*r)-.39*inner*exp(-inner*inner);
+    slope=delta/max(d,.003)*ridge*.32*(1.-age)*smoothstep(.0,.09,age)*nearRing*uStandingWater.y;
+  }`}
+  vec3 levelNormal=mat3(viewMatrix)*normalize(vec3(slope.x,1.,slope.y));
+  return normalize(mix(surfaceNormal,levelNormal,wetPool*.97));
+}
+vec3 poolLight(vec3 lit, vec3 viewNormal, vec3 wp, float footprint){
+  float water=clamp(wetPool+wetFilm*.15,0.,1.);
+  if(water<.001) return lit;
+  vec3 n=inverseTransformDirection(viewNormal,viewMatrix), v=normalize(cameraPosition-wp), r=reflect(-v,n);
+  float nv=clamp(dot(n,v),0.,1.), fresnel=.024+.976*pow(1.-nv,5.);
+  float grazing=smoothstep(-.12,.045,r.y);
+  r.y=max(r.y,.012); r=normalize(r);
+  vec3 sky=mix(uHor,uZen,sqrt(r.y));
+  float alignment=max(dot(r,uSkySun),0.);
+  sky+=uSkyK*(.35*pow(alignment,8.)+.7*pow(alignment,64.))*(1.-.85*uSkyP.y);
+  ${LOW ? '' : `if(wetPool>.025 && footprint<.24 && uSkyP.z<.04){
+    vec3 detailed=skyCol(r,0.);
+    sky=mix(sky,detailed,(1.-smoothstep(.09,.24,footprint))*smoothstep(.025,.20,wetPool));
+  }`}
+  return mix(lit,sky,water*fresnel*grazing);
+}`;
+  function waterLighting(s, wp) {
+    s.sh.uniforms.uStandingWater = wetState;
+    Object.assign(s.sh.uniforms, Sky.U);
+    s.f('#include <emissivemap_fragment>', `float wetFoot=max(length(dFdx(${wp}.xz)),length(dFdy(${wp}.xz)));
+      normal=poolNormal(normal,${wp},wetFoot);
+      #include <emissivemap_fragment>`);
+    s.f('#include <opaque_fragment>', `outgoingLight=poolLight(outgoingLight,normal,${wp},wetFoot);
+      #include <opaque_fragment>`);
+  }
   const ROADF = /* glsl */`
-uniform float uTime, uWetR; varying vec3 vRd, vRw; float rdHt, rdRo;
+varying vec3 vRd, vRw; float rdHt, rdRo;
 vec3 rdSurface(){
   float s=vRd.x, o=vRd.y, k=vRd.z, a=abs(o); vec2 q=vRw.xz; float near=smoothstep(70.,6.,length(cameraPosition-vRw));
   // resurfaced sections, each a slightly different tone, with a tar seam across the road where they meet
@@ -53,7 +103,8 @@ vec3 rdSurface(){
   asp=mix(asp,asp*.62,smoothstep(.035,0.,abs(o-.15))*.55);
   float cr=smoothstep(.016,0.,abs(vnoise(q*.33+tone*9.)-.5))*step(.52,vnoise(q*.05+3.)); asp=mix(asp,vec3(.01),cr*.9);
   // rubber laid down on the racing line, which moves to the inside of each bend
-  float line=clamp(k*55.,-1.,1.)*1.9, rub=exp(-pow((o-line)/1.15,2.))*(.3+.7*smoothstep(.002,.012,abs(k))); asp=mix(asp,asp*.5,rub*.75);
+  float line=clamp(k*55.,-1.,1.)*1.9, offset=(o-line)/1.15;
+  float rub=exp(-offset*offset)*(.3+.7*smoothstep(.002,.012,abs(k))); asp=mix(asp,asp*.5,rub*.75);
   rdRo=mix(.82,.6,rub); rdHt=.0018*agg-.004*seam-.003*cr;
   // paint, worn: edge lines, a broken centre line, a chequered band at the start line
   float worn=smoothstep(.2,.55,vnoise(q*9.)+.35*vnoise(q*40.));
@@ -67,27 +118,38 @@ vec3 rdSurface(){
   // gravel shoulder
   float sh=smoothstep(3.42,3.6,a)*(1.-kb); vec2 hq=q*9., hi=floor(hq), hf=fract(hq)-.5; float st=length(hf+(hash22(hi)-.5)*.5), id=hash21(hi);
   vec3 grav=mix(vec3(.16,.15,.13),vec3(.4,.37,.33),id)*(1.-.55*smoothstep(.2,.42,st)); col=mix(col,grav,sh); rdHt=mix(rdHt,.02*(1.-smoothstep(.15,.4,st)),sh); rdRo=mix(rdRo,.95,sh);
-  // standing water in the low patches; more of it, and a wet sheen everywhere, when it rains
-  float pud=smoothstep(.64-.3*uWetR,.74-.3*uWetR,vnoise(q*.11+5.)*.7+vnoise(q*.37)*.3)*(1.-sh)*(1.-pm*.5);
-  col=mix(col,col*.45,pud*.8+uWetR*.35*(1.-sh)); rdRo=mix(rdRo,.05,pud); rdRo=mix(rdRo,.28,uWetR*.6*(1.-sh)*(1.-pud)); rdHt*=1.-pud;
+  // Ruts, seams and the lower edge of the crowned road take water before coarse, draining gravel.
+  float wheelOffset=(abs(o-line)-.84)/.46;
+  float track=exp(-wheelOffset*wheelOffset), gutter=smoothstep(1.9,3.26,a)*(1.-smoothstep(3.36,3.9,a));
+  float bed=.25+.23*vnoise(vec2(s*.17,o*.73))+.13*vnoise(q*.70)+.25*track+.21*gutter+.24*vDrain-.20*(1.-smoothstep(.12,.63,a));
+  float sc=wxCover(vRw,1.)*(1.-.75*rub*(1.-smoothstep(.75,1.,uWx.x)));
+  wetPool=fillBasin(bed,smoothstep(.02,.48,vDrain))*(1.-.93*sh)*(1.-kb)*(1.-sc)*(1.-uWx.y);
+  wetFilm=uWx.z*(1.-sc)*(1.-sh*.70)*uStandingWater.z;
+  col*=1.-.37*uWx.z*(1.-.55*sh); col*=1.-.40*wetPool;
+  float footprint=max(length(dFdx(q)),length(dFdy(q)));
+  rdRo=mix(rdRo,.34,uWx.z*.70*(1.-.65*sh)); rdRo=mix(rdRo,mix(.078,.22,smoothstep(.024,.26,footprint)),wetPool);
+  rdHt*=1.-.95*wetPool;
   // the cold: ice whitens the puddles and glazes the rest; snow lies over it all, thinner on the line the tyres keep clear
-  float ice=uWx.y*(.3+.7*pud)*(.7+.3*vnoise(q*2.3)); col=mix(col,vec3(.62,.72,.8),ice*.55); rdRo=mix(rdRo,.07,uWx.y*.85);
-  float sc=wxCover(vRw,1.)*(1.-.75*rub*(1.-smoothstep(.75,1.,uWx.x))); col=mix(col,vec3(.86,.89,.94)*(.92+.08*agg),sc); rdRo=mix(rdRo,.72,sc); rdHt=mix(rdHt,.012*vnoise(q*1.7),sc);
+  float ice=uWx.y*(.3+.7*smoothstep(.50,.85,bed))*(.7+.3*vnoise(q*2.3)); col=mix(col,vec3(.62,.72,.8),ice*.55); rdRo=mix(rdRo,.07,uWx.y*.85);
+  col=mix(col,vec3(.86,.89,.94)*(.92+.08*agg),sc); rdRo=mix(rdRo,.72,sc); rdHt=mix(rdHt,.012*vnoise(q*1.7),sc);
   return col; }`;
-  const RU = { uWetR: { value: 0 } };
   function roadMat() { const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .8, metalness: 0, envMapIntensity: 1 });
-    patch(m, s => { s.sh.uniforms.uWetR = RU.uWetR; s.vHead('attribute vec3 aRd; varying vec3 vRd, vRw;');
-      s.v('#include <begin_vertex>', '#include <begin_vertex>\n  vRd = aRd; vRw = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-      s.fHead(GLSL_NOISE + GLSL_WX + ROADF); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = rdSurface();');
+    patch(m, s => { s.vHead('attribute vec3 aRd; attribute float aDrain; varying float vDrain; varying vec3 vRd, vRw;');
+      s.v('#include <begin_vertex>', '#include <begin_vertex>\n  vRd = aRd; vDrain = aDrain; vRw = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      waterLighting(s,'vRw'); s.fHead(GLSL_NOISE + GLSL_WX + waterShader + ROADF); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = rdSurface();');
       s.f('#include <roughnessmap_fragment>', 'float roughnessFactor = rdRo;');
       s.f('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 sp = -vViewPosition, sx = dFdx(sp), sy = dFdy(sp), r1 = cross(sy, normal), r2 = cross(normal, sx); float det = dot(sx, r1), fw = max(length(sx), length(sy));\n    vec3 gr = sign(det) * (dFdx(rdHt) * r1 + dFdy(rdHt) * r2); normal = normalize(abs(det) * normal - gr * (1.0 - smoothstep(0.004, 0.06, fw))); }'); }, 'road');
     return m; }
-  function roadMesh(mat) { const OFF = [-6.2, -4.6, -3.9, -3.5, -3.25, -2.4, -1.2, 0, 1.2, 2.4, 3.25, 3.5, 3.9, 4.6, 6.2], C = OFF.length, n = RD.n, pos = new Float32Array((n + 1) * C * 3), rd = new Float32Array((n + 1) * C * 3), idx = []; let k = 0;
+  function roadMesh(mat) { const OFF = [-6.2, -4.6, -3.9, -3.5, -3.25, -2.4, -1.2, 0, 1.2, 2.4, 3.25, 3.5, 3.9, 4.6, 6.2], C = OFF.length, n = RD.n, pos = new Float32Array((n + 1) * C * 3), rd = new Float32Array((n + 1) * C * 3), drain = new Uint8Array((n + 1) * C), idx = []; let k = 0;
     for (let i = 0; i <= n; i++) { const ii = i % n, a = (ii + n - 1) % n, b = (ii + 1) % n; let tx = RD.px[b] - RD.px[a], tz = RD.pz[b] - RD.pz[a]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
+      // Sample two points twelve metres along the road on either side. Rises shed water; dips retain it.
+      const h0=RD.py[ii], hA=RD.py[(ii+n-6)%n], hB=RD.py[(ii+6)%n], grade=Math.abs(hB-hA)/24;
+      const retention=clamp(.63+(hA+hB-2*h0)*.52)*(1-sm(.045,.16,grade));
+      drain.fill(Math.round(255*retention),i*C,(i+1)*C);
       for (let j = 0; j < C; j++) { const off = OFF[j], d = Math.abs(off), x = RD.px[ii] - tz * off, z = RD.pz[ii] + tx * off, y = d <= 3.5 ? RD.py[ii] + .08 - .012 * d : d <= 4.6 ? lerp(RD.py[ii] + .04, RD.py[ii] - .02, (d - 3.5) / 1.1) : H0(x, z) - .7;
         pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z; rd[k * 3] = i * 2; rd[k * 3 + 1] = off; rd[k * 3 + 2] = RD.k[ii]; k++; }
       if (i < n) for (let j = 0; j < C - 1; j++) { const a0 = i * C + j, b0 = a0 + 1, c0 = a0 + C, d0 = c0 + 1; idx.push(a0, b0, c0, b0, d0, c0); } }
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aRd', new THREE.BufferAttribute(rd, 3)); g.setIndex(idx); g.computeVertexNormals();
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aRd', new THREE.BufferAttribute(rd, 3)); g.setAttribute('aDrain', new THREE.BufferAttribute(drain,1,true)); g.setIndex(idx); g.computeVertexNormals();
     const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.name = 'road'; return m; }
   const micro = (x, z) => (NZ.fbm(x / 7, 0, z / 7, 3) + .5) * .5 + (NZ.n3(x / 1.3, 0, z / 1.3) + 1) * .05;
   const grad = (x, z) => { const e = 3; return [(H0(x + e, z) - H0(x - e, z)) / (2 * e), (H0(x, z + e) - H0(x, z - e)) / (2 * e)]; };
@@ -120,7 +182,7 @@ vec3 rdSurface(){
     if (Math.abs(x - GP.x) < 31 && Math.abs(z - GP.z) < 31) return H0(x, z) + .14 + micro(x, z) * sm(11, 22, Math.hypot(x - GP.x, z - GP.z)); return H0(x, z) - .15; }
 
   const FRAG = /* glsl */`
-uniform float uTime; varying vec3 vIw, vIn; varying float vIp; float isHt, isRo;
+varying vec3 vIw, vIn; varying float vIp; float isHt, isRo;
 vec2 isVor(vec2 x){ vec2 n=floor(x),f=fract(x); float md=8.,id=0.; for(int j=-1;j<=1;j++) for(int i=-1;i<=1;i++){ vec2 g=vec2(float(i),float(j)); vec2 o=hash22(n+g); vec2 r=g+o-f; float d=dot(r,r); if(d<md){ md=d; id=hash21(n+g+7.); } } return vec2(sqrt(md),id); }
 vec3 isGround(){
   vec2 q=vIw.xz; float alt=vIw.y, sl=1.-normalize(vIn).y, near=smoothstep(110.,12.,length(cameraPosition-vIw));
@@ -150,20 +212,45 @@ vec3 isGround(){
   isHt=mix(isHt,.02*st+.012*n3,pth); vec3 o=mix(alb,dirt,pth);
   float wg=uWx.z*(1.-beach*wet); o*=mix(1.,mix(.66,.5,pth),wg); isRo=mix(isRo,mix(.5,.22,pth),wg*.85);                         // wet earth is darker and shines; the path turns to mud
   float fr=uWx.y*(.55+.45*n3); o=mix(o,vec3(.7,.78,.86),fr*.4); isRo=mix(isRo,.3,uWx.y*.6);                                   // hoar frost and glaze
-  float sc=wxCover(vIw,1.-sl)*(1.-.9*smoothstep(.9,.1,alt)); o=mix(o,vec3(.87,.9,.95)*(.9+.1*n2),sc); isRo=mix(isRo,.7,sc); isHt=mix(isHt,.03*n2+.01*n3,sc);     // the sea keeps the water's edge clear
+  float sc=wxCover(vIw,1.-sl)*(1.-.9*smoothstep(.9,.1,alt));
+  float slopeGate=1.-smoothstep(.009,.056,sl);
+  float bed=.15+.33*vDrain+.20*vnoise(q*.37)+.15*n2+.20*pth+.06*beach+.055*rk;
+  // Absorbent grass stays matte; packed trail hollows and hollows at the tide line retain larger pools.
+  wetPool=fillBasin(bed,slopeGate)*mix(.33,1.,max(pth,beach*.75))*(1.-sc)*(1.-uWx.y)*smoothstep(.0,.35,alt);
+  wetFilm=wg*max(pth*.9,max(rk*.38,beach*.45))*(1.-sc)*uStandingWater.z;
+  float footprint=max(length(dFdx(q)),length(dFdy(q)));
+  o*=1.-.43*wetPool; isHt*=1.-.95*wetPool; isRo=mix(isRo,mix(.085,.24,smoothstep(.024,.26,footprint)),wetPool);
+  o=mix(o,vec3(.87,.9,.95)*(.9+.1*n2),sc); isRo=mix(isRo,.7,sc); isHt=mix(isHt,.03*n2+.01*n3,sc);     // the sea keeps the water's edge clear
   return o; }`;
   function groundMat() { const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .95, metalness: 0, envMapIntensity: .5 });
-    patch(m, s => { s.vHead('attribute float aPath; varying vec3 vIw, vIn; varying float vIp;');
-      s.v('#include <begin_vertex>', '#include <begin_vertex>\n  vIw = (modelMatrix * vec4(transformed, 1.0)).xyz; vIn = normalize(mat3(modelMatrix) * normal); vIp = aPath;');
-      s.fHead(GLSL_NOISE + GLSL_WX + FRAG); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = isGround();');
+    patch(m, s => { s.vHead('attribute float aPath, aDrain; varying vec3 vIw, vIn; varying float vIp, vDrain;');
+      s.v('#include <begin_vertex>', '#include <begin_vertex>\n  vIw = (modelMatrix * vec4(transformed, 1.0)).xyz; vIn = normalize(mat3(modelMatrix) * normal); vIp = aPath; vDrain = aDrain;');
+      waterLighting(s,'vIw'); s.fHead(GLSL_NOISE + GLSL_WX + waterShader + FRAG); s.f('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = isGround();');
       s.f('#include <roughnessmap_fragment>', 'float roughnessFactor = isRo;');
       // relief from the procedural height, by screen-space derivatives; it fades out where a pixel is wider than the relief
       s.f('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 sp = -vViewPosition, sx = dFdx(sp), sy = dFdy(sp), r1 = cross(sy, normal), r2 = cross(normal, sx); float det = dot(sx, r1), fw = max(length(sx), length(sy));\n    vec3 gr = sign(det) * (dFdx(isHt) * r1 + dFdy(isHt) * r2); normal = normalize(abs(det) * normal - gr * (1.0 - smoothstep(0.03, 0.25, fw))); }'); }, 'island');
     return m; }
+  // Compare the slopes to the two neighbours in each direction. A gully keeps water even on a
+  // graded trail; the independent normal-based slope gate rules out water clinging to steep rock.
+  function terrainDrain(pos, cols, rows, stride) {
+    const values = new Uint8Array(cols * rows);
+    function sideSlope(k,j) {
+      const dx=pos[j]-pos[k], dz=pos[j+2]-pos[k+2];
+      return (pos[j+1]-pos[k+1])/Math.max(.1,Math.hypot(dx,dz));
+    }
+    for(let y=0;y<rows;y++) for(let x=0;x<cols;x++){
+      const i=y*cols+x, k=3*i;
+      const l=3*(y*cols+Math.max(0,x-stride)), r=3*(y*cols+Math.min(cols-1,x+stride));
+      const a=3*(Math.max(0,y-stride)*cols+x), b=3*(Math.min(rows-1,y+stride)*cols+x);
+      const bend=sideSlope(k,l)+sideSlope(k,r)+sideSlope(k,a)+sideSlope(k,b);
+      values[i]=Math.round(255*clamp(.47+1.7*bend));
+    }
+    return new THREE.BufferAttribute(values,1,true);
+  }
   function gridMesh(x0, z0, w, n, hf, mat, skirt) { const pos = new Float32Array(n * n * 3), pa = new Float32Array(n * n), idx = new Uint32Array((n - 1) * (n - 1) * 6); let q = 0;
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const x = x0 + i / (n - 1) * w, z = z0 + j / (n - 1) * w, k = (j * n + i) * 3, e = skirt && (i === 0 || j === 0 || i === n - 1 || j === n - 1); pos[k] = x; pos[k + 1] = hf(x, z) - (e ? .6 : 0); pos[k + 2] = z; }
     for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) { const a = j * n + i, b = a + 1, c = a + n, d = c + 1; idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = b; idx[q++] = c; idx[q++] = d; }
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPath', new THREE.BufferAttribute(pa, 1)); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPath', new THREE.BufferAttribute(pa, 1)); g.setAttribute('aDrain',terrainDrain(pos,n,n,Math.max(1,Math.round(3*(n-1)/w)))); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
     const m = new THREE.Mesh(g, mat); m.receiveShadow = true; return m; }
   function ribbon(mat) {       // fine ground laid along the trail: 33 cm cells at the path, widening to the sides, with the path cut flat
     const OFF = [0, .33, .66, 1, 1.4, 1.9, 2.5, 3.2, 4.1, 5.2, 6.4, 7.6, 8.4], W = OFF.length - 1, C = 2 * W + 1, n = T.n, pos = new Float32Array(n * C * 3), pa = new Float32Array(n * C), idx = []; let k = 0;
@@ -171,7 +258,7 @@ vec3 isGround(){
       for (let j = -W; j <= W; j++) { const d = OFF[Math.abs(j)], off = Math.sign(j) * d, x = T.px[i] - tz * off, z = T.pz[i] + tx * off;
         pos[k * 3] = x; pos[k * 3 + 1] = Math.abs(j) === W ? H0(x, z) - 1 : fineH(x, z, d, T.py[i]); pos[k * 3 + 2] = z; pa[k] = 1 - sm(.4, 1.05, d); k++; }
       if (i < n - 1) for (let j = 0; j < C - 1; j++) { const a0 = i * C + j, b0 = a0 + 1, c0 = a0 + C, d0 = c0 + 1; idx.push(a0, b0, c0, b0, d0, c0); } }
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPath', new THREE.BufferAttribute(pa, 1)); g.setIndex(idx); g.computeVertexNormals();
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPath', new THREE.BufferAttribute(pa, 1)); g.setAttribute('aDrain',terrainDrain(pos,C,n,2)); g.setIndex(idx); g.computeVertexNormals();
     const m = new THREE.Mesh(g, mat); m.receiveShadow = true; return m; }
 
   // ---- what grows on it (prototypes in metres) ----
@@ -245,7 +332,17 @@ vec3 isGround(){
     prog(.3); await tick();
     grp.add(ribbon(gm)); grp.add(roadMesh(roadMat()));
     grp.add(gridMesh(GP.x - 30, GP.z - 30, 60, 200, (x, z) => H0(x, z) + .14 + micro(x, z) * sm(11, 22, Math.hypot(x - GP.x, z - GP.z)), gm, true)); prog(.45); await tick();
-    G.tick.push(() => { const te = G.tEnv === undefined ? G.t : G.tEnv; RU.uWetR.value = typeof Weather !== 'undefined' ? Weather.S.wet : sm(31.2, 36, te) * (1 - sm(68, 76, te)); });
+    // A shareable post-rain view; the regular weather simulation immediately takes it from here.
+    Weather.S.pooled = Q.has('wet') ? .91 : 0;
+    if (Q.has('wet')) Weather.S.wet = .95;
+    G.tick.push((t,dt) => {
+      const w=Weather.S, state=wetState.value;
+      const target=Math.max(w.rain,w.wet*.85)*(1.-w.ice);
+      const tau=target>w.pooled?CFG.surface.fillTime:CFG.surface.drainTime;
+      w.pooled+=(target-w.pooled)*(1-Math.exp(-dt/Math.max(.02,tau)));
+      state.x=w.pooled;
+      state.y=w.rain*(1.-w.ice); state.z=G.look.surface?1:0;
+    });
     const mTree = FXKit.mat({ sway: [.02, 10] }), mGrass = FXKit.mat({ sway: [.22, .3] }), mShrub = FXKit.mat({ sway: [.06, .4] }), mStill = FXKit.mat();
     const P = { near: [conifer(false, 15, 18, true, .34, 3), conifer(true, 13, 18, true, .34, 3)], mid: [conifer(false, 8, 10), conifer(true, 7, 10)], far: [outline(), outline()],
       tuft: [tuft(.36, 14), tuft(.3, 14), tuft(.42, 13)], bil: [bilberry(), bilberry()], fern: [fern(), fern()], rock: [0, 1, 2, 3].map(i => K.tag(K.blob(i * 7.3 + 1, .3, 14, 10), '#ffffff', 7, K.M([0, 0, 0], [0, 0, 0], [1, .72, 1]))),

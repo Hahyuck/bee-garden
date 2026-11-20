@@ -38,8 +38,10 @@ const CFG = {
     mist: .008, mistFalloff: .22,      // the low mist: how thick at the waterline, how fast it thins with height
   },
   sea: { level: 0, swell: .22, windSwell: .9 },
+  surface: { fillTime: 5, drainTime: 38, rippleRange: 16 },  // seconds to fill/drain hollows; rain rings resolve within this many metres
   light: { occlusion: .5, bounce: .05 },       // the light field: how much the canopy blocks the sky's fill, how much sunlit canopy gives back
   post: { exposure: 1, nightGain: 3.2, snowStop: .38, shafts: .9, fringe: .0009,      // fringe: colour fringing at the frame's edge; much more than this turns thin dark things against the sky purple
+    contactRadius: .95, contactStrength: 1.65,  // maximum sampling distance in metres and occlusion gain
     bloom: 1, vignette: .38, grain: .028 },
   lens: { beeAperture: 1.1 },      // the bee's lens: how wide it is open (the Bee Garden's own value; larger blurs more away from the focus)
   camera: { fov: 60, flySpeed: 7, flyFast: 40, eye: 1.66, walkSpeed: 1.35 },
