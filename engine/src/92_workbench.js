@@ -6,20 +6,27 @@ const Workbench=(()=>{
     <button type="button" data-menu="visual" aria-controls="game-visual">게임 비주얼</button><button type="button" data-menu="tools" aria-controls="tools-row">도구</button></div>
     <div id="play-row" class="bar-row" aria-label="플레이 모드" hidden></div>
     <div id="tools-row" class="bar-row" aria-label="도구" hidden><label>날씨 <select data-weather></select></label><label>시각 <input data-hour type="range" min="0" max="23.75" step=".25"><output data-time></output></label></div>`;
-  form.innerHTML=`<div class="composer-line"><label for="game-idea">제작할 게임</label><input id="game-idea" required maxlength="1800" autocomplete="off" placeholder="만들고 싶은 게임을 입력하세요"><button type="submit">만들기</button>
+  form.innerHTML=`<div class="composer-line"><label for="game-idea">제작할 게임</label><input id="game-idea" required maxlength="1800" autocomplete="off" placeholder="만들고 싶은 게임을 입력하세요">
+    <select name="provider" aria-label="제작 AI"><option value="codex">GPT · Codex</option><option value="claude">Claude Code</option></select><button type="submit">AI로 열기</button>
     <button type="button" data-settings aria-controls="composer-settings" aria-expanded="false">설정</button></div>
-    <section id="composer-settings" hidden><div class="choices"><label>작업 <select name="operation"><option value="new">새 게임 만들기</option><option value="edit">현재 게임 개편</option></select></label>
-    <label>생성 방법 <select name="provider"><option value="local">로컬 AI · Ollama</option><option value="browser">브라우저 내장 AI</option><option value="template">즉시 규칙 초안</option></select></label></div>
-    <details data-connect><summary>로컬 AI 연결 방법</summary><p>Ollama와 <code>python engine/tools/serve_studio.py</code>를 실행하고 설치된 모델 이름을 입력하세요.</p><label>Ollama 모델 <input name="model" value="qwen2.5:7b" maxlength="100"></label></details>
-    <output data-status aria-live="polite"></output><article data-preview hidden><strong></strong><p></p><button type="button" data-apply>이 설정으로 플레이</button></article></section>`;
+    <section id="composer-settings" hidden><div class="choices"><label>작업 <select name="operation"><option value="new">새 게임 만들기</option><option value="edit">현재 게임 개편</option></select></label></div>
+    <p data-instructions></p><output data-status aria-live="polite"></output>
+    <div data-recovery hidden><button type="button" data-copy>요청문 복사</button> <a data-web target="_blank" rel="noopener noreferrer"></a>
+    <textarea data-full hidden readonly aria-label="전체 제작 요청문" rows="4"></textarea></div></section>`;
   document.body.append(bar,form);
   const picker=document.querySelector('#mode-picker'), visual=document.querySelector('#game-visual');
   picker.hidden=true;bar.append(picker,visual);
   const play=bar.querySelector('#play-row'),tools=bar.querySelector('#tools-row'),buttons=[...bar.querySelectorAll('[data-menu]')];
   const rows={play,visual,tools},settings=form.querySelector('#composer-settings'),settingsButton=form.querySelector('[data-settings]');
-  const input=form.querySelector('#game-idea'),status=form.querySelector('[data-status]'),preview=form.querySelector('[data-preview]');
-  const {provider,operation,model}=form.elements;
-  let current=null,proposal=null,revision=0;
+  const input=form.querySelector('#game-idea'),status=form.querySelector('[data-status]');
+  const {provider,operation}=form.elements,help=form.querySelector('[data-instructions]'),recovery=form.querySelector('[data-recovery]');
+  const web=recovery.querySelector('[data-web]'),full=recovery.querySelector('[data-full]');
+  let current=null,lastPrompt='';
+  try{
+    if(localStorage.getItem('garden.creator')==='claude')provider.value='claude';
+    input.value=sessionStorage.getItem('garden.gameIdea')||'';
+    if(sessionStorage.getItem('garden.operation')==='edit')operation.value='edit';
+  }catch{}
   function syncMode(){
     const selected=picker.selectedOptions[0];
     buttons[0].textContent=selected?.textContent||'플레이 모드';buttons[0].setAttribute('aria-label','플레이 모드 · '+buttons[0].textContent);
@@ -58,24 +65,39 @@ const Workbench=(()=>{
   weather.onchange=()=>Weather.set(weather.value);
   hour.oninput=()=>{G.day=+hour.value;time.textContent=Math.floor(G.day)+'시';};
   settingsButton.onclick=()=>{open(null);showSettings(settings.hidden);};
+  function describeAgent(){
+    const claude=provider.value==='claude';
+    help.textContent=claude?'Claude Code 웹에서 GitHub 저장소와 요청문을 확인한 뒤 보내세요.':'Codex 앱에서 Git 저장소와 요청문을 확인한 뒤 보내세요. 처음에는 이 저장소의 작업 폴더를 선택해야 할 수 있습니다.';
+    web.href=claude?'https://claude.ai/code?repositories='+encodeURIComponent(Studio.repository):'https://chatgpt.com/codex';
+    web.textContent=claude?'Claude Code 웹 열기':'Codex 웹 열기';
+  }
+  describeAgent();
   form.addEventListener('input',()=>{
-    revision++;proposal=null;preview.hidden=true;status.textContent='';
-    form.querySelector('[data-connect]').hidden=provider.value!=='local';
-    form.querySelector('[type=submit]').disabled=false;
+    lastPrompt='';status.textContent='';recovery.hidden=true;full.hidden=true;full.value='';describeAgent();
+    try{localStorage.setItem('garden.creator',provider.value);sessionStorage.setItem('garden.gameIdea',input.value);sessionStorage.setItem('garden.operation',operation.value);}catch{}
   });
-  form.onsubmit=async e=>{
+  form.onsubmit=e=>{
     e.preventDefault();const request=input.value.trim();if(!request){input.focus();return;}
     open(null);showSettings(true);
-    const id=++revision,button=form.querySelector('[type=submit]');button.disabled=true;proposal=null;preview.hidden=true;
-    status.textContent=provider.value==='template'?'규칙을 구성하는 중…':'AI 응답을 기다리는 중…';
-    try{const p=await Scenario.generate(request,provider.value,model.value.trim(),operation.value==='edit');
-      if(id!==revision)return;proposal=p;preview.hidden=false;preview.querySelector('strong').textContent=p.title;
-      preview.querySelector('p').textContent=[Modes.MODES[p.mode].name,VisualStyle.names[p.style],Weather.NAME[p.weather],Math.floor(p.hour)+'시',Scenario.goal(p)].join(' · ');status.textContent='초안을 확인하세요.';
-    }catch(err){if(id===revision)status.textContent=err instanceof TypeError?'AI 연결 실패. 로컬 AI 연결 방법을 확인하거나 즉시 규칙 초안을 선택하세요.':err.message;}
-    finally{if(id===revision)button.disabled=false;}
+    const idea=document.querySelector('#engine-studio [data-idea]');if(idea)idea.value=request;
+    lastPrompt=Studio.prompt(request,operation.value);recovery.hidden=false;full.hidden=true;
+    const claude=provider.value==='claude',encoded=encodeURIComponent(lastPrompt);
+    const href=claude?web.href+'&prompt='+encoded:'codex://threads/new?originUrl='+encodeURIComponent(Studio.remote+'.git')+'&prompt='+encoded;
+    // Protocol handlers and web gateways have different limits. Keep the full request available on return.
+    if(href.length>(claude?24000:28000)){
+      full.value=lastPrompt;full.hidden=false;
+      status.textContent='요청문이 링크에 담기에는 깁니다. 전체 요청문을 복사해 아래 웹 작업창에 붙여 넣으세요.';return;
+    }
+    const launch=document.createElement('a');launch.href=href;launch.rel='noopener noreferrer';
+    if(claude)launch.target='_blank';
+    document.body.append(launch);launch.click();launch.remove();
+    status.textContent=claude?'새 탭에서 보내기를 누르면 제작을 시작합니다.':'앱 열기를 허용한 뒤 보내세요. 앱이 열리지 않으면 요청문을 복사해 Codex 웹에서 사용할 수 있습니다.';
   };
-  form.querySelector('[data-apply]').onclick=()=>{if(!proposal)return;Scenario.apply(proposal,operation.value==='new');
-    const idea=document.querySelector('[data-idea]');if(idea)idea.value=input.value;showSettings(false);document.activeElement?.blur();};
+  recovery.querySelector('[data-copy]').onclick=async()=>{
+    const text=lastPrompt;if(!text)return;
+    try{await navigator.clipboard.writeText(text);if(text===lastPrompt)status.textContent='전체 제작 요청문을 복사했습니다.';}
+    catch{if(text!==lastPrompt)return;full.value=text;full.hidden=false;full.focus();full.select();status.textContent='선택된 전체 요청문을 복사하세요.';}
+  };
   for(const region of [bar,form]){
     region.addEventListener('keydown',e=>{
       e.stopPropagation();if(e.isComposing||e.keyCode===229)return;

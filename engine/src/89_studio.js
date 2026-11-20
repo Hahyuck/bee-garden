@@ -1,6 +1,6 @@
 'use strict';
 const Studio=(()=>{
-  const repo='https://github.com/Hahyuck/bee-garden/tree/main/engine';
+  const repository='Hahyuck/bee-garden', remote='https://github.com/'+repository;
   const rows=new Map(), props=new Map(), actors=new Map(), urls=new Map(), mixers=new Map();
   let database=null, projectMode=false, busy=false;
   const open=document.createElement('button');open.id='studio-open';open.type='button';open.textContent='제작';open.setAttribute('aria-expanded','false');
@@ -125,10 +125,17 @@ const Studio=(()=>{
       character:ActorWalk.currentId,scenario:Scenario.config,
       assets:[...rows.values()].map(({id,name,role,height,x,z,yaw,filename,path})=>({id,name,role,height,x,z,yaw,path:path||'assets/project/'+filename}))};
   }
-  function prompt(){
+  function prompt(request=idea.value.trim(), operation='edit'){
     const spec=manifest();
-    return repo+'\n\n만들고 싶은 게임\n'+(spec.description||'플레이 목표, 조작, 클리어 조건을 적어 주세요.')+
-      '\n\n이 저장소의 engine을 기반으로 구현해 주세요. engine/README.md와 engine/GUIDE.md를 읽고, 기존 모드와 물리·입력·렌더러를 재사용해 주세요. 아래 프로젝트 설정과 첨부한 GLB를 반영하고 브라우저에서 직접 실행해 검증해 주세요.\n'+JSON.stringify(spec,null,2);
+    const hour=Math.floor(G.day*4)/4;
+    const scene=new URL('https://hahyuck.github.io/bee-garden/engine/');
+    scene.search=new URLSearchParams({mode:spec.mode,style:spec.style,day:String(hour),weather:Weather.S.mode,
+      raster:String(spec.raster),pixelFit:spec.pixelFit}).toString();
+    delete spec.description;
+    return (operation==='new'?'새 게임 제작':'현재 게임 개편')+'\n'+(request||'플레이 목표, 조작, 클리어 조건을 적어 주세요.')+
+      '\n\nGitHub '+remote+' · engine/\n브라우저 미리보기 '+scene.href+
+      '\n이 저장소의 engine/README.md와 engine/GUIDE.md를 읽고 게임을 구현해 주세요. 미리보기를 브라우저로 열어 현재 장면을 확인하고, 구현 후 수정한 빌드를 브라우저에서 직접 플레이해 검증해 주세요.'+
+      '\n현재 프로젝트 설정\n'+JSON.stringify(spec)+(spec.assets.length?'\n브라우저에서 가져온 GLB는 별도 파일입니다. 저장소에 있는 에셋을 먼저 확인해 주세요.':'');
   }
   get('copy').onclick=async()=>{
     const s=prompt();try{await navigator.clipboard.writeText(s);status.textContent='저장소 링크와 제작 요청을 복사했습니다.';}
@@ -164,5 +171,5 @@ const Studio=(()=>{
     libraryState();VisualControls.refresh();
   }
   G.tick.push((t,dt)=>{for(const mixer of mixers.values())mixer.update(dt);});
-  return {restore,manifest,prompt};
+  return {restore,manifest,prompt,repository,remote};
 })();

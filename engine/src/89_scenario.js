@@ -4,8 +4,6 @@ const Scenario=(()=>{
   const weather=['clear','rain','snow','frost','auto'];
   const object={fishing:'물고기 잡기',fps:'표적 명중',boat:'부표 통과',drive:'관문 통과',collect:'통·돌 낙하'};
   const max={drive:4};
-  const schema={type:'object',properties:{title:{type:'string'},mode:{type:'string',enum:modes},style:{type:'string',enum:Object.keys(VisualStyle.names)},
-    weather:{type:'string',enum:weather},hour:{type:'number',minimum:0,maximum:23.75},target:{type:'integer',minimum:1,maximum:5000}},required:['title','mode','style','weather','hour','target'],additionalProperties:false};
   let config=null,progress=0,previous=0,first=true,done=false;
   const prev=new THREE.Vector3(),pos=new THREE.Vector3();
   const output=document.createElement('output');output.id='scenario-goal';output.hidden=true;document.body.append(output);
@@ -35,26 +33,5 @@ const Scenario=(()=>{
     }
     first=false;done=progress>=config.target;paint();
   });
-  function draft(text,current,edit){
-    const mode=[['fishing',/낚|떡밥|fishing/i],['sub',/잠수|산호|잠망|해저|거북|submarine/i],['boat',/항해|부표|보트|항구|boat/i],['drive',/운전|차량|레이싱|경주|드리프트|race/i],
-      ['fps',/사격|표적|조준|fps/i],['flight',/경비행|비행기|이륙|활주로|plane/i],['bee',/꿀벌|꽃가루|벌이|꿀모/i],['collect',/랜덤.{0,4}낙하|낙하|통과?\s*돌|통을|떨어[지뜨]|수집/i],['actors',/캐릭터|등반|벽타|산행|탐험|달리/i]].find(([,r])=>r.test(text))?.[0]||(edit&&modes.includes(current.mode)?current.mode:'actors');
-    const style=[['gaussian',/가우시안/],['diorama',/디오라마/],['yeoul-3d',/흑연/],['cradle-3d',/클린\s*픽셀/],['yeoul-2d',/단색\s*도트/],['yeoul-25d',/디더링/],['cradle-25d',/2\.5D|HD-2D/i],['cradle-2d',/2D|클린.?도트/i],['pixel',/픽셀/]].find(([,r])=>r.test(text))?.[0]||(edit?current.style:'native');
-    const target=Number(text.match(/(\d+)\s*(?:마리|개|회|미터|m\b)/i)?.[1])||(object[mode]?3:100);
-    return validate({title:text.split(/[\r\n]/)[0].slice(0,42),mode,style,weather:/눈|설원/.test(text)?'snow':/비가|폭우|빗|비 오는/.test(text)?'rain':edit&&weather.includes(Weather.S.mode)?Weather.S.mode:'clear',hour:/밤|야간/.test(text)?22:/노을|해질/.test(text)?18:/새벽/.test(text)?6:edit?G.day:14,target});
-  }
-  async function generate(text,provider,model,edit){
-    const current=Studio.manifest(),baseline=draft(text,current,edit);if(provider==='template')return baseline;
-    const system='Design a playable Bee Garden scenario. Return only JSON matching the schema. Use a short title in the language of the user. Target is catch count in fishing, hits in fps, buoys in boat, gates in drive (max 4), number of falling barrels and stones in collect, meters otherwise. Preserve unspecified settings when revising. Style names: '+JSON.stringify(VisualStyle.names)+'. Schema: '+JSON.stringify(schema);
-    const message=JSON.stringify({request:text,operation:edit?'revise':'new',current:{mode:current.mode,style:current.style,weather:Weather.S.mode,hour:G.day,scenario:current.scenario}});
-    if(provider==='browser'){
-      const lm=globalThis.LanguageModel;if(!lm||await lm.availability()==='unavailable')throw Error('이 브라우저에서 기기 내 AI를 사용할 수 없습니다. 로컬 Ollama 또는 즉시 규칙 초안을 선택하세요.');
-      const session=await lm.create({initialPrompts:[{role:'system',content:system}]});
-      try{return validate(JSON.parse(await session.prompt(message,{responseConstraint:schema})));}finally{session.destroy();}
-    }
-    const base=location.port==='11435'?'': 'http://127.0.0.1:11435';
-    const res=await fetch(base+'/studio/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,system,message,schema}),signal:AbortSignal.timeout(100000)});
-    if(!res.ok)throw Error('로컬 AI 서버가 응답하지 않았습니다 ('+res.status+'). 연결 방법을 확인하세요.');
-    return validate(await res.json());
-  }
-  return {apply,generate,validate,goal,get config(){return config;}};
+  return {apply,validate,goal,get config(){return config;}};
 })();
