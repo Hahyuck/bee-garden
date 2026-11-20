@@ -6,6 +6,10 @@ Created by Creative Labs
 
 **사용 안내: [GUIDE.md](GUIDE.md)** — 실행하고 고치기, 세계 바꾸기, 물리와 효과, 게임 규칙 넣기, 게임 엔진으로 활용하는 방법을 예시와 함께 정리했습니다. `0` 키의 "통+돌 랜덤 낙하"가 그 예시 게임입니다(`src/89_example_collect.js`).
 
+## LAST SIGNAL · 생존 FPS
+
+[**LAST SIGNAL 플레이**](https://hahyuck.github.io/bee-garden/engine/survival/) — 해안 중계소에서 봇 7명과 경쟁하는 240p 솔로 매치입니다. 노란 보급함에 접근하면 탄약과 체력을 얻습니다. 왼쪽 아래 지도에서 안전 구역을 확인하세요.
+
 ## COASTLINE GT — 새 아케이드 레이싱
 
 [**COASTLINE GT 플레이**](https://hahyuck.github.io/bee-garden/engine/arcade/?style=pixel&raster=240&pixelFit=auto&day=11.5&weather=clear) · [제작·조작 안내](arcade/README.md)
