@@ -4,13 +4,15 @@
 
 **사용 안내: [GUIDE.md](GUIDE.md)** — 실행하고 고치기, 세계 바꾸기, 물리와 효과, 게임 규칙 넣기, 게임 엔진으로 활용하는 방법을 예시와 함께 정리했습니다. `0` 키의 "통 모으기"가 그 예시 게임입니다(`src/89_example_collect.js`).
 
-자유 비행은 해안 정원의 바위 앞에서 시작합니다. 옆면에는 갈라진 암반의 결이 이어지고, 아래로 내려가면 흙에 파묻힌 자갈이 보입니다. [오후의 해안 정원](https://hahyuck.github.io/bee-garden/engine/?day=16.15&still&weather=clear) · [사람과 동물 보행 테스트](https://hahyuck.github.io/bee-garden/engine/?mode=actors&day=16&weather=clear)
+자유 비행은 해안 정원의 바위 앞에서 시작합니다. 옆면에는 갈라진 암반의 결이 이어지고, 아래로 내려가면 흙에 파묻힌 자갈이 보입니다. [오후의 해안 정원](https://hahyuck.github.io/bee-garden/engine/?day=16.15&still&weather=clear) · [캐릭터 직접 조작](https://hahyuck.github.io/bee-garden/engine/?mode=actors&day=16&weather=clear)
 
 ### 재질과 모델의 출처
 
 바위·갓길·흙에는 Poly Haven의 CC0 스캔 네 종을 사용했습니다. 색상과 표면 정보를 각기 한 장에 묶고, 표면 정보에는 OpenGL 노멀의 두 축, 거칠기, 상대 높이를 저장했습니다. [Rock Boulder Cracked](https://polyhaven.com/a/rock_boulder_cracked) · [Rock Ground 02](https://polyhaven.com/a/rock_ground_02) · [Brown Mud 02](https://polyhaven.com/a/brown_mud_02) · [Rock Face 03](https://polyhaven.com/a/rock_face_03) · [Poly Haven 라이선스](https://polyhaven.com/license)
 
-보행 테스트에는 Polygonal Mind의 VRChat 컬렉션에서 CC0로 공개한 Kate와 Froggy를 사용했습니다. 원본 VRM의 메시·스킨·텍스처를 웹용 GLB로 정리하고 걷기와 도약 동작을 제작했습니다. Froggy는 원작의 의인화된 개구리입니다. 로더는 Three.js r180의 MIT 라이선스 GLTFLoader와 BufferGeometryUtils에 기반합니다. [Kate 원본](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_038) · [Froggy 원본](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_010) · [Three.js GLTFLoader](https://github.com/mrdoob/three.js/blob/r180/examples/jsm/loaders/GLTFLoader.js)
+캐릭터 모드에서는 Polygonal Mind가 VRChat용으로 공개한 다섯 사람 중 하나를 조종합니다. Kate, 제니퍼, 리디아, 올드 머스태시, 우주비행사가 같은 지면에서 대기·걷기로 전환하며, 일정 거리 이상 떨어지면 Froggy가 도약해 따라옵니다. 각 아바타의 원본 메시·스킨·텍스처를 GLB에 담았습니다. [추가 아바타 원본과 출처](assets/samples/people/CREDITS.md) Froggy는 원작의 의인화된 개구리입니다. 로더는 Three.js r180의 MIT 라이선스 GLTFLoader와 BufferGeometryUtils에 기반합니다. [Kate 원본](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_038) · [Froggy 원본](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_010) · [Three.js GLTFLoader](https://github.com/mrdoob/three.js/blob/r180/examples/jsm/loaders/GLTFLoader.js)
+
+오른쪽 **샘플**에서 제작자와 라이선스를 확인하고 모델을 GLB로 받을 수 있습니다. 현장 무전기, 쇼어라인 스포츠카, 스턴트기는 Sacchan-VRC의 VRChat 프로젝트에서 가져왔습니다. 건물은 rikeri의 VRChat 제작 튜토리얼에 쓰인 2층 멀티룸과 Kenney의 주택을 실었습니다. 자동차와 비행기는 형태·크기·재질을 살펴보는 정적 모델입니다. [월드 모델 출처](assets/samples/world/CREDITS.md) · [멀티룸 출처](assets/samples/world/CREDITS-RIKERI.md)
 
 ## 실행
 
@@ -28,7 +30,8 @@ python -m http.server 8765
 | 키 | 동작 |
 |---|---|
 | `1` `2` `3` `4` | 자유 비행 · 벌 · 산행 · 운전 |
-| `V` | 정원에서 사람과 개구리의 보행·도약 보기. 화면을 끌면 시점을 돌릴 수 있습니다. |
+| `V` | 캐릭터 조작. WASD나 방향키로 걷고 화면을 끌어 시점을 돌립니다. 터치 기기는 왼쪽 스틱으로 이동합니다. |
+| 화면 오른쪽 **샘플** | 사람을 바꾸거나 소품·건물·자동차·비행기를 골라 정원에서 돌려 봅니다. 각 모델의 원본과 이용 조건을 함께 볼 수 있습니다. |
 | `5` `6` `7` `8` `9` | 맑음 · 비 · 눈 · 혹한 · 자동 날씨 |
 | `[` `]` / `T` | 시각을 한 시간씩 옮기기 / 시간 흐름 멈춤 |
 | `F` `G` `X` | 돌 던지기 · 벌통 상자 놓기 · 폭발 |

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "jennifer",
+    "label": "제니퍼",
+    "author": "Polygonal Mind",
+    "origin": "VRChat · 100Avatars",
+    "source": "https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_052",
+    "sourceUrl": "https://raw.githubusercontent.com/PolygonalMind/100Avatars/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_052/100Avatars_052_Jennifer.vrm",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "file": "jennifer.glb",
+    "height": 1.56
+  },
+  {
+    "id": "lydia",
+    "label": "리디아",
+    "author": "Polygonal Mind",
+    "origin": "VRChat · 100Avatars",
+    "source": "https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_054",
+    "sourceUrl": "https://raw.githubusercontent.com/PolygonalMind/100Avatars/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_054/100Avatars_054_Lydia.vrm",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "file": "lydia.glb",
+    "height": 1.78
+  },
+  {
+    "id": "old-moustache",
+    "label": "올드 머스태시",
+    "author": "Polygonal Mind",
+    "origin": "VRChat · 100Avatars",
+    "source": "https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_004",
+    "sourceUrl": "https://raw.githubusercontent.com/PolygonalMind/100Avatars/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_004/100Avatars_004_OldMoustache.vrm",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "file": "old-moustache.glb",
+    "height": 1.64
+  },
+  {
+    "id": "astronaut",
+    "label": "우주비행사",
+    "author": "Polygonal Mind",
+    "origin": "VRChat · 100Avatars",
+    "source": "https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_048",
+    "sourceUrl": "https://raw.githubusercontent.com/PolygonalMind/100Avatars/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_048/100Avatars_048_Astronaut.vrm",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "file": "astronaut.glb",
+    "height": 1.58
+  }
+]

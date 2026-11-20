@@ -52,8 +52,14 @@ const Modes = (() => {
     const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); camera.fov = fix[6] || CC.fov; camera.near = fix[7] || .3; line = ''; }
     else line = MODES[cur].step(camera, dt);
     const high = camera.position.y - Math.max(Island.surf(camera.position.x, camera.position.z)[0], 0); shadows(camera, cur === 'bee' && !fix ? 2 : high > 45 ? 0 : 1);
-    if (performance.now() - hudAt > 250) { hudAt = performance.now(); hud.textContent = Object.keys(MODES).map((k, i) => (k === cur ? '▸' : ' ') + (MODES[k].key || i + 1) + ' ' + MODES[k].name).join('   ') + '   H 엔진 활용법\n' + line; } }
+    if (performance.now() - hudAt > 250) {
+      hudAt = performance.now();
+      const modes = innerWidth < 620 ? MODES[cur].name : Object.keys(MODES).map((k, i) =>
+        (k === cur ? '▸' : ' ') + (MODES[k].key || i + 1) + ' ' + MODES[k].name).join('   ') + '   H 엔진 활용법';
+      hud.textContent = modes + '\n' + line;
+    } }
   addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); if (e.code === 'KeyB' && !e.repeat && cur === 'bee') eyeOn = !eyeOn; const i = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code); if (i >= 0) set(Object.keys(MODES)[i]); else if (extra[e.code]) set(extra[e.code]); if (cur === 'hike' && e.code.startsWith('Arrow')) e.preventDefault(); });
   addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) keys.clear(); });
   return { step, set, add, visitOutcrop, MODES, fly, keys, get cur() { return cur; } };
 })();

@@ -1,0 +1,12 @@
+# VRChat human samples
+
+The four character meshes, skins and color textures are by Polygonal Mind. The studio published the original VRChat avatars and design history in [100Avatars](https://github.com/PolygonalMind/100Avatars). Its [v24.02.1 release](https://github.com/PolygonalMind/100Avatars/releases/tag/v24.02.1) grants CC0 for the collection. The four source VRM files each identify Polygonal Mind as the author and CC0 as the license. Download URLs below are pinned to the same release commit.
+
+These self-contained glTF 2.0 adaptations keep the original meshes, skeletons, skin weights, UVs and embedded texture. The engine uses standard rough PBR shading. Facial morph targets and VRM-specific scripts and shader settings were omitted. Each file contains two new, in-place animations authored for Bee Garden, TrailIdle and TrailWalk. No external motion clips are included. Catalog heights are display heights selected for the garden, in metres.
+
+| Avatar | Creator source | Original VRM | Original SHA-256 |
+| --- | --- | --- | --- |
+| Jennifer | [Model directory](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_052) | [Download](https://raw.githubusercontent.com/PolygonalMind/100Avatars/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_052/100Avatars_052_Jennifer.vrm) | `59d7d7e79d4ad24d097dfade6ca067dd99ecc885ec5545b4d61aeda357505a92` |
+| Lydia | [Model directory](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_054) | [Download](https://raw.githubusercontent.com/PolygonalMind/100Avatars/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_054/100Avatars_054_Lydia.vrm) | `441500ca343d37c4bef3461a015dfab8fff4850613728db5a32b8d0dfd1c1e65` |
+| OldMoustache | [Model directory](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_004) | [Download](https://raw.githubusercontent.com/PolygonalMind/100Avatars/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_004/100Avatars_004_OldMoustache.vrm) | `2c04e1567bfe0e864e38bbfcb09056c276e74d5540c4ea71d5e4bb0a5e74b35e` |
+| Astronaut | [Model directory](https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_048) | [Download](https://raw.githubusercontent.com/PolygonalMind/100Avatars/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_048/100Avatars_048_Astronaut.vrm) | `1cb8218610deafc0fd4608507fc52cf3303de84b0f641b9a452efb5e8a0e6f23` |

@@ -17,7 +17,15 @@ const LookPanel = (() => {
   ];
   const btn = {}, css = 'font:600 12px/1.3 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;border:1px solid rgba(243,217,189,.25);border-radius:8px;padding:5px 9px;cursor:pointer;text-align:left;';
   const box = document.createElement('div'); box.style.cssText = 'position:fixed;left:14px;top:12px;z-index:6;display:flex;flex-direction:column;gap:5px;background:rgba(14,12,10,.6);padding:9px;border-radius:11px;border:1px solid rgba(243,217,189,.18);max-width:190px;max-height:calc(100dvh - 24px);box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain';
-  const title = document.createElement('div'); title.textContent = '라이팅 비교 (L)'; title.style.cssText = 'font:700 12px "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;opacity:.8;margin-bottom:2px'; box.appendChild(title);
+  const title = document.createElement('button'); title.type = 'button';
+  title.style.cssText = 'font:700 12px "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;background:transparent;border:0;text-align:left;padding:2px;cursor:pointer';
+  box.appendChild(title);
+  function expand(open) {
+    for (const item of box.children) if (item !== title) item.style.display = open ? (item === row ? 'flex' : '') : 'none';
+    title.setAttribute('aria-expanded', String(open));
+    title.textContent = open ? '라이팅 비교 ▴' : '라이팅 비교 ▾';
+  }
+  title.addEventListener('click', () => expand(title.getAttribute('aria-expanded') !== 'true'));
   const paint = () => { for (const [k, name] of PARTS) { const on = G.look[k]; btn[k].textContent = (on ? '● ' : '○ ') + name; btn[k].style.background = on ? 'rgba(232,181,74,.28)' : 'rgba(14,12,10,.4)'; btn[k].style.opacity = on ? 1 : .7; } };
   const make = (text, fn, tip) => { const b = document.createElement('button'); b.textContent = text; b.title = tip || ''; b.style.cssText = css + 'background:rgba(14,12,10,.4)'; b.addEventListener('click', e => { e.stopPropagation(); fn(); paint(); b.blur(); }); b.addEventListener('pointerdown', e => e.stopPropagation()); box.appendChild(b); return b; };
   const all = v => { for (const [k] of PARTS) G.look[k] = v; };
@@ -26,7 +34,7 @@ const LookPanel = (() => {
   preset('기본 조명', () => { all(false); G.look.shadows = true; }, '해 하나, 하늘·땅 보조광, 그림자만. 나머지는 모두 끔');
   preset('전부 켜기', () => all(true), '지금 엔진의 라이팅 전부');
   for (const [k, name, tip] of PARTS) btn[k] = make(name, () => { G.look[k] = !G.look[k]; }, tip);
-  function build() { document.body.appendChild(box); paint(); if (Q.has('nopanel')) box.style.display = 'none'; { const q = Q.get('look'); if (q === 'plain') { all(false); G.look.shadows = true; paint(); } } }
+  function build() { document.body.appendChild(box); paint(); expand(innerWidth >= 700); if (Q.has('nopanel')) box.style.display = 'none'; { const q = Q.get('look'); if (q === 'plain') { all(false); G.look.shadows = true; paint(); } } }
   addEventListener('keydown', e => { if (e.code === 'KeyL' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) box.style.display = box.style.display === 'none' ? 'flex' : 'none'; });
   return { build, paint, all };
 })();

@@ -58,6 +58,29 @@ def embed_map(path):
     mime = {".jpg": "image/jpeg", ".png": "image/png", ".glb": "model/gltf-binary"}[os.path.splitext(path)[1]]
     return f"data:{mime};base64,{encoded}"
 
+def sample_catalog():
+    entries = []
+    for group in ("people", "world"):
+        folder = os.path.join("assets", "samples", group)
+        catalog = os.path.join(BASE, folder, "catalog.json")
+        if not os.path.isfile(catalog):
+            catalog = os.path.join(ROOT, folder, "catalog.json")
+        if not os.path.isfile(catalog):
+            continue
+        with open(catalog, encoding="utf-8-sig") as source:
+            rows = json.load(source)
+        for row in rows:
+            entry = dict(row)
+            entry["file"] = "/".join(("assets", "samples", group, row["file"]))
+            if group == "people":
+                entry["category"] = "person"
+            entries.append(entry)
+    return entries
+
+def script_json(value):
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+
+samples = sample_catalog()
 out = shell.replace("{{THREE}}", three).replace("{{APP}}", joined)
 if "{{GEOLOGY_MAPS}}" in out:
     out = out.replace("{{GEOLOGY_MAPS}}", json.dumps({k: embed_map(path) for k, path in geology.items()}))
@@ -65,6 +88,8 @@ if "{{ACTOR_MODELS}}" in out:
     with open(os.path.join(V, "gltf-loader-r180.js"), encoding="utf-8") as loader_file:
         out = out.replace("{{ACTOR_LOADER}}", "<script>" + loader_file.read() + "</script>")
     out = out.replace("{{ACTOR_MODELS}}", json.dumps({k: embed_map(path) for k, path in actors.items()}))
+if "{{SAMPLE_CATALOG}}" in out:
+    out = out.replace("{{SAMPLE_CATALOG}}", script_json([{**item, "file": embed_map(item["file"])} for item in samples]))
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 tmp = OUT + ".tmp"; open(tmp, "w").write(out); os.replace(tmp, OUT)
 print(f"built {os.path.relpath(OUT, ROOT)} {len(out)/1024:.0f} KB ({len(app)} modules)")
@@ -73,6 +98,7 @@ if not WS:
     loader = ("import('./vendor/three.module.min.js').then(async T => { window.THREE = T; for (const f of " + repr(names) + ") await new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'src/' + f + '?' + Date.now(); s.onload = ok; s.onerror = () => no(new Error('could not load ' + f)); document.head.appendChild(s); }); });")
     dev = shell.replace("<script>{{THREE}}</script>", "").replace("{{APP}}", loader)
     dev = dev.replace("{{GEOLOGY_MAPS}}", json.dumps(geology)).replace("{{ACTOR_MODELS}}", json.dumps(actors))
+    dev = dev.replace("{{SAMPLE_CATALOG}}", script_json(samples))
     dev = dev.replace("{{ACTOR_LOADER}}", '<script src="vendor/gltf-loader-r180.js"></script>')
     open(os.path.join(ROOT, "dev.html"), "w", encoding="utf-8").write(dev)
     open(os.path.join(ROOT, "index.html"), "w", encoding="utf-8").write(out)

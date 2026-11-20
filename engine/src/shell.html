@@ -9,14 +9,33 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
 #load p{margin:0;opacity:.7;font-weight:500;text-align:center}
 #track{width:min(360px,70vw);height:3px;background:rgba(243,230,210,.16);border-radius:2px;overflow:hidden}
 #bar{height:100%;width:0;background:#e8b54a;transition:width .2s}
+#sample-button,#sample-picker{position:fixed;right:max(14px,env(safe-area-inset-right));z-index:7;font:600 13px/1.45 system-ui,sans-serif;color:#f3e6d2;background:#1c1a17f2;border:1px solid #eddbbf44;border-radius:9px;box-sizing:border-box}
+#sample-button{top:54px;min-height:38px;padding:7px 13px;cursor:pointer}
+#sample-picker{top:98px;width:min(290px,calc(100vw - 28px));max-height:calc(100dvh - 118px);overflow:auto;overscroll-behavior:contain;padding:16px;box-shadow:0 8px 30px #0006}
+#sample-picker h2{font-size:16px;margin:0 0 12px}#sample-picker label{display:block;margin-top:9px;color:#cfbda5;font-size:12px}
+#sample-picker select{width:100%;margin-top:4px;padding:8px;font:inherit;color:inherit;background:#282521;border:1px solid #eadac040;border-radius:6px}
+#sample-picker button{font:inherit;cursor:pointer;border-radius:6px;border:1px solid #eadac040;padding:8px 11px}
+#sample-close{position:absolute;top:8px;right:8px;color:inherit;background:transparent}
+#sample-run{width:100%;margin-top:12px;color:#211907;background:#e8b54a}
+#sample-exit{width:100%;margin-top:7px;color:inherit;background:transparent}
+#sample-credits{font-weight:400;margin:10px 0 0;color:#d5c8b6}#sample-credits a{color:#ecd7ac}
 </style></head><body>
 <canvas id="c"></canvas>
+<button id="sample-button" type="button" aria-expanded="false" aria-controls="sample-picker">샘플</button>
+<section id="sample-picker" aria-labelledby="sample-title" hidden>
+  <h2 id="sample-title">3D 샘플</h2><button id="sample-close" type="button" aria-label="샘플 닫기">×</button>
+  <label>분류<select id="sample-category"></select></label>
+  <label>모델<select id="sample-model"></select></label>
+  <p id="sample-credits"></p><button id="sample-run" type="button"></button>
+  <button id="sample-exit" type="button" hidden>자유 비행으로 돌아가기</button>
+</section>
 <div id="load"><h1>garden engine</h1><div id="track"><div id="bar"></div></div><div id="what">준비</div>
-<p>1 자유 · 2 벌 · 3 산행 · 4 운전<br>5 맑음 · 6 비 · 7 눈 · 8 혹한 · 9 자동 날씨<br>[ ] 시각 · T 시간 멈춤 · F 돌 · G 상자 · X 폭발 · M 소리<br>H 엔진 활용법</p></div>
+<p>1 자유 · 2 벌 · 3 산행 · 4 운전 · V 캐릭터<br>5 맑음 · 6 비 · 7 눈 · 8 혹한 · 9 자동 날씨<br>[ ] 시각 · T 시간 멈춤 · F 돌 · G 상자 · X 폭발 · M 소리<br>H 엔진 활용법</p></div>
 <script>{{THREE}}</script>
 <script>window.GEOLOGY_MAPS={{GEOLOGY_MAPS}};</script>
 {{ACTOR_LOADER}}
 <script>window.GARDEN_ACTORS={{ACTOR_MODELS}};</script>
+<script>window.GARDEN_SAMPLES={{SAMPLE_CATALOG}};</script>
 <script>
 {{APP}}
 </script></body></html>
