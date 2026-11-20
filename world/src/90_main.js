@@ -83,6 +83,7 @@
   if (typeof Rock !== 'undefined') add('raising the sea fort', 14, async prog => { await Rock.build(scene, prog, tick); });
   if (typeof Island !== 'undefined') add('raising the island', 16, async prog => { await Island.build(scene, prog, tick); });
   if (typeof Garden !== 'undefined') add('planting the garden', 10, async prog => { await Garden.build(scene, prog, tick); });
+  if (typeof Drive !== 'undefined') add('rolling out the car', 1, async prog => { Drive.build(scene); prog(1); });
   if (typeof Arch !== 'undefined') add('building the red halls', 8, async prog => { await Arch.build(scene, prog, tick); });
   if (typeof Flora !== 'undefined') add('growing maples and pines', 14, async prog => { await Flora.build(scene, prog, tick); });
   if (typeof Dragon !== 'undefined') add(G.tour ? 'rigging the cranes' : 'waking the dragons', 14, async prog => { const c0 = new Set(scene.children), f0 = new Set(fx.children); await Dragon.build(scene, fx, prog, tick); if (typeof Wake !== 'undefined' && Wake.build) Wake.build(scene, fx);
@@ -262,7 +263,7 @@
   addEventListener('click', () => { if (paused) setPaused(false); else go(); });
   addEventListener('keydown', e => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;      // shortcuts of the system and the browser are not ours
-    if (e.code === 'Space') { e.preventDefault(); setPaused(!paused); }
+    if (e.code === 'Space') { if (G.drive) return; e.preventDefault(); setPaused(!paused); }
     else if (e.code === 'KeyM') go();
   });
   // ---- QA (added): #t40 holds the film at 40 s, #play runs it; a small readout says what the machine is doing ----

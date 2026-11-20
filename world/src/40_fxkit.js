@@ -68,7 +68,7 @@ const FXKit = (() => {
 
   // ---- the surface library (fragment). Material ids:
   //  0 plain  1 leaf (veins)  2 petal (streaks, nectar guide)  3 grass blade  4 timber  5 insect fuzz  6 fur (tabby)  7 stone  8 florets / pollen
-  //  9 glossy  10 honeycomb  15 cat's eye  17 striped fuzz  19 bark  22 needle-bearing branch (cut out)  23 conifer bough tier (ragged rim, cut out)  26 fern (cut out)
+  //  9 glossy  10 honeycomb  15 cat's eye  17 striped fuzz  19 bark  22 needle-bearing branch (cut out)  23 conifer bough tier (ragged rim, cut out)  24 far conifer (outline drawn on a card)  26 fern (cut out)
   const FRAG = /* glsl */`
 varying float vM, vH; varying vec3 vWp, vOp; varying vec2 vFxUv;
 uniform float uGuide, uPupil;
@@ -102,6 +102,9 @@ vec3 fxSurface(vec3 alb){
   else if(m==23){ float v=uv.y, fr=vnoise3(vec3(uv.x*70.,vOp.y*2.,uv.x*17.)), bough=abs(fract(uv.x*9.+vnoise3(vec3(vOp.y*1.7,uv.x*3.,1.))*.35)-.5);
     if(v>.55+.45*fr||(bough>.4+.08*fr&&v>.3)) discard;
     alb*=mix(.35,1.2,v)*(.7+.6*vnoise3(vec3(uv.x*40.,v*6.,vOp.y))); fxTrans=.4; fxRough=.8; fxAO=mix(.4,1.,v); }
+  else if(m==24){ float v=uv.y, x=abs(uv.x-.5)*2., t=fract(v*7.), w=((1.-v)*(1.-.42*t)+.03)*(.82+.36*vnoise3(vec3(uv.x*38.,v*46.,3.)));
+    bool trunk=x<.045&&v<.24; if((x>w||v<.13)&&!trunk) discard;
+    alb=trunk&&(x>w||v<.13)?vec3(.09,.06,.04):alb*mix(.3,1.1,clamp(x/max(w,.01),0.,1.))*(.7+.6*vnoise3(vec3(uv.x*30.,v*40.,1.))); fxTrans=.3; }
   else if(m==26){ float u=abs(uv.x-.5)*2.; if(u>.1&&fract(uv.y*15.+u*.8)>.62) discard; alb*=.8+.4*uv.y; fxTrans=.7; fxAO=mix(.5,1.,smoothstep(0.,.3,vH)); }
   return alb*fxAO;
 }`;

@@ -1,0 +1,113 @@
+'use strict';
+// ---- driving: a small rally hatchback on the island's coast road. A rigid body on four sprung wheels: each wheel finds the ground
+//      under it (road, gravel, grass, sand: Island.surf), carries load through a spring and damper, and makes grip from its slip
+//      (a saturating curve, inside a friction circle). Front-wheel drive, five gears changed for you, a handbrake on the rear axle.
+//      Around it, the frame of a game: input (keyboard and gamepad), a chase camera, lap timing, a pause menu, a readout, engine sound. ----
+const Drive = (() => {
+  const RD = Island.RD, V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), YAX = V(0, 1, 0);
+  const M = 980, IX = 1450, IY = 1650, IZ = 520, RAD = .3, REST = .3, TRAV = .17, KS = 27000, CS = 2900, G9 = 9.81;
+  const WL = [[.74, -.18, 1.22], [-.74, -.18, 1.22], [.74, -.18, -1.18], [-.74, -.18, -1.18]].map(a => V(...a));      // +X is the car's left, +Z its nose
+  const MU = [1.05, .78, .62, .5], RR = [14, 70, 110, 190], GEAR = [0, 3.55, 2.05, 1.42, 1.08, .86], FINAL = 3.9, REV = 3.4;
+  const car = { p: V(), q: new THREE.Quaternion(), v: V(), w: V(), comp: [0, 0, 0, 0], len: [.2, .2, .2, .2], spin: [0, 0, 0, 0], steer: 0, gear: 1, rpm: 900, slip: 0, thr: 0, air: 0, surf: 0, bad: 0 };
+  const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, keys = new Set(), gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
+  const bx = V(), by = V(), bz = V(), F = V(), Tq = V(), A = V(), C = V(), r = V(), vC = V(), wf = V(), ws = V(), nrm = V(), f = V(), tmp = V(), camP = V(), dir = V(), tgt = V(), dq = new THREE.Quaternion(), mm = new THREE.Matrix4(), QY = new THREE.Quaternion().setFromAxisAngle(YAX, Math.PI);
+  let grp = null, wheels = [], on = false, paused = false, camMode = 0, hud, menu, lapT = 0, lapOn = false, last = 0, best = 0, prog = 0, lastI = 0, camInit = false, snd = null, drive = 0, brake = 0, shiftT = 0, wet = 0, pad = [false, false, false];
+  try { best = +localStorage.getItem('oneworld.bestLap') || 0; } catch (e) {}
+  const fmt = s => s ? Math.floor(s / 60) + ':' + (s % 60).toFixed(2).padStart(5, '0') : '-:--.--';
+
+  function reset(i) { const n = RD.n; i = ((i % n) + n) % n; const j = (i + 1) % n;
+    car.p.set(RD.px[i], RD.py[i] + .08 + .7, RD.pz[i]); car.q.setFromAxisAngle(YAX, Math.atan2(RD.px[j] - RD.px[i], RD.pz[j] - RD.pz[i])); car.v.set(0, 0, 0); car.w.set(0, 0, 0); car.comp.fill(.09); car.gear = 1; car.bad = 0; car.steer = 0; camInit = false; lastI = i; }
+  function build(scene) {
+    const std = (c, m, ro, o = {}) => new THREE.MeshStandardMaterial({ color: c, metalness: m, roughness: ro, envMapIntensity: 1.1, ...o });
+    const paint = std(0xf2b632, .25, .32), glass = std(0x0b0f13, .6, .08), trim = std(0x151515, .1, .7), tire = std(0x0b0b0c, 0, .92), rim = std(0x9aa0a6, .9, .3), wax = std(0xe9d9a8, 0, .8),
+      lamp = std(0xffffff, 0, .3, { emissive: 0xfff2c8, emissiveIntensity: 1.4 }), tail = std(0x7a0c08, 0, .4, { emissive: 0xc0140c, emissiveIntensity: 1.1 });
+    grp = new THREE.Group(); grp.name = 'car'; grp.visible = false; scene.add(grp);
+    const ext = (pts, w, mat, bevel = .06) => { const g = new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(p => new THREE.Vector2(p[0], p[1]))), { depth: w - 2 * bevel, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3 }); g.rotateY(-Math.PI / 2); g.translate((w - 2 * bevel) / 2, 0, 0); const m = new THREE.Mesh(g, mat); grp.add(m); return m; };
+    const bxm = (w, h, d, x, y, z, mat) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); grp.add(m); return m; };
+    ext([[-1.86, -.40], [1.84, -.40], [1.93, -.16], [1.88, .06], [1.12, .2], [-1.66, .22], [-1.88, .08], [-1.92, -.18]], 1.62, paint);            // the hull, in side view (z, y)
+    ext([[1.0, .18], [.42, .72], [-1.22, .74], [-1.72, .2]], 1.42, glass, .04);                                                                   // the glasshouse
+    ext([[.46, .71], [.42, .77], [-1.24, .79], [-1.28, .73]], 1.4, paint, .03);                                                                    // the roof
+    for (const s of [-1, 1]) { bxm(.05, .52, .09, s * .7, .46, -.34, paint); bxm(.02, .1, 2.7, s * .815, -.06, 0, trim); bxm(.34, .12, .06, s * .56, -.02, 1.9, lamp); bxm(.3, .12, .05, s * .58, .02, -1.9, tail); }
+    bxm(1.66, .16, .14, 0, -.31, 1.9, trim); bxm(1.66, .16, .14, 0, -.31, -1.9, trim); bxm(.7, .1, .04, 0, -.14, 1.925, trim);
+    bxm(.72, .24, .52, 0, .93, -.5, wax); bxm(.78, .04, .58, 0, 1.07, -.5, trim); for (const z of [-.66, -.5, -.34]) bxm(.74, .02, .02, 0, .9, z, trim);            // what it carries: a hive box on the roof
+    wheels = WL.map(L => { const g = new THREE.Group(); g.rotation.order = 'YXZ'; const t = new THREE.Mesh(new THREE.CylinderGeometry(RAD, RAD, .2, 22).rotateZ(Math.PI / 2), tire), rm = new THREE.Mesh(new THREE.CylinderGeometry(.19, .19, .21, 6).rotateZ(Math.PI / 2), rim); g.add(t, rm); g.position.copy(L); grp.add(g); return g; });
+    grp.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    hud = document.createElement('div'); hud.style.cssText = 'position:fixed;right:18px;bottom:16px;text-align:right;font:700 13px/1.35 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;text-shadow:0 1px 8px rgba(0,0,0,.8);z-index:5;pointer-events:none;display:none;font-variant-numeric:tabular-nums;white-space:pre'; document.body.appendChild(hud);
+    menu = document.createElement('div'); menu.style.cssText = 'position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(6,5,3,.72);z-index:7;font:600 15px/1.9 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;text-align:center;white-space:pre';
+    menu.textContent = '일시정지\n\nW / ↑  가속      S / ↓  브레이크·후진\nA D / ← →  조향      Space  핸드브레이크\nC  카메라      V  뒤 보기      R  도로로 복귀\n\n게임패드: RT 가속 · LT 브레이크 · 왼쪽 스틱 조향 · A 핸드브레이크 · Y 카메라 · X 복귀\n\nEsc  계속하기'; document.body.appendChild(menu);
+    reset(RD.n - 6);
+  }
+  function readInput() {
+    let acc = keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0, brk = keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0, st = (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) - (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0), hb = keys.has('Space') ? 1 : 0, look = keys.has('KeyV');
+    const gp = navigator.getGamepads ? [...navigator.getGamepads()].find(g => g && g.mapping === 'standard') : null;
+    if (gp) { const b = gp.buttons; acc = Math.max(acc, b[7].value); brk = Math.max(brk, b[6].value); if (Math.abs(gp.axes[0]) > .12) st = -gp.axes[0]; hb = Math.max(hb, b[0].pressed ? 1 : 0); look = look || b[5].pressed;
+      const edge = (k, i, fn) => { if (b[i].pressed && !pad[k]) fn(); pad[k] = b[i].pressed; }; edge(0, 3, () => { camMode = (camMode + 1) % 3; camInit = false; }); edge(1, 2, back); edge(2, 9, () => setPaused(!paused)); }
+    inp.acc = acc; inp.brk = brk; inp.st = st; inp.hb = hb; inp.look = look;
+  }
+  const back = () => { const o = Island.nearRoad(car.p.x, car.p.z); reset(o.d < 1e8 ? o.i : lastI); };
+  function setPaused(v) { paused = v; menu.style.display = v ? 'flex' : 'none'; }
+  function control(dt) {
+    const vf = car.v.dot(bz), spd = Math.abs(vf), lim = Math.min(.56, 31 / Math.max(spd * spd, 1)); car.steer += (inp.st * lim - car.steer) * (1 - Math.exp(-dt * (Math.abs(inp.st) > .05 ? 6 : 9)));      // the faster it goes, the less lock it is given
+    let thr = inp.acc, brk = inp.brk; if (car.gear > 0) { if (vf < .8 && brk > .1 && thr < .1) car.gear = -1; } else if (vf > -.8 && thr > .1 && brk < .1) car.gear = 1;
+    if (car.gear < 0) { const t = thr; thr = brk; brk = t; }
+    const ratio = (car.gear < 0 ? -REV : GEAR[car.gear]) * FINAL; let rpm = Math.max(spd / RAD * Math.abs(ratio) * 9.549, 900 + thr * 2200 * (1 - sm(0, 4, spd)));
+    shiftT -= dt; if (car.gear > 0 && shiftT <= 0) { if (rpm > 6100 && car.gear < 5) { car.gear++; shiftT = .35; } else if (rpm < 2500 && car.gear > 1) { car.gear--; shiftT = .35; } }
+    car.rpm += (Math.min(rpm, 7000) - car.rpm) * (1 - Math.exp(-dt * 12));
+    const tq = 168 * (1 - Math.pow((car.rpm - 4300) / 5400, 2)) * thr * (car.rpm > 6850 ? 0 : 1) * (shiftT > .2 ? 0 : 1); drive = tq * ratio * .9 / RAD; brake = brk * 9500; car.thr = thr;
+  }
+  function sub(h) {
+    const q = car.q; bx.set(1, 0, 0).applyQuaternion(q); by.set(0, 1, 0).applyQuaternion(q); bz.set(0, 0, 1).applyQuaternion(q); F.set(0, -M * G9, 0); Tq.set(0, 0, 0); let slip = 0, air = 0;
+    for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z);
+      const gy = g[0] + g[1] * (A.x - g[3]) + g[2] * (A.z - g[4]), len = (A.y - gy - RAD) / Math.max(by.y, .35); car.len[i] = clamp(len, REST - TRAV - .04, REST + .06);
+      if (len > REST) { car.comp[i] = 0; air++; continue; }
+      const c = Math.min(REST - len, TRAV + .08); let Fz = KS * c + CS * (c - car.comp[i]) / h; if (c > TRAV) Fz += 90000 * (c - TRAV); car.comp[i] = c; if (Fz <= 0) continue; Fz = Math.min(Fz, 4 * M * G9);
+      nrm.set(-g[1], 1, -g[2]).normalize(); C.copy(A).addScaledVector(by, -(len + RAD)); r.subVectors(C, car.p); vC.copy(car.w).cross(r).add(car.v);
+      const st = i < 2 ? car.steer : 0; wf.copy(bz).multiplyScalar(Math.cos(st)).addScaledVector(bx, Math.sin(st)); wf.addScaledVector(nrm, -wf.dot(nrm)).normalize(); ws.crossVectors(nrm, wf);
+      const vl = vC.dot(wf), vs = vC.dot(ws), mu = MU[g[5]] * (g[5] === 0 ? 1 - .2 * wet : 1) * (i > 1 && inp.hb > .5 ? .55 : 1), al = Math.atan2(vs, Math.abs(vl) + 1.2);
+      let Fy = -mu * Fz * Math.sin(1.5 * Math.atan(9 * al)), Fx = (i < 2 ? drive * .5 : 0) - clamp(vl * 6, -1, 1) * (brake * (i < 2 ? .31 : .19) + (i > 1 ? inp.hb * 2600 : 0)) - vl * RR[g[5]];
+      const mag = Math.hypot(Fx, Fy), mx = mu * Fz; if (mag > mx) { Fx *= mx / mag; Fy *= mx / mag; }
+      slip += Math.min(1, Math.abs(al) * 3 + (mag > mx ? .3 : 0)) * Math.min(1, Math.abs(vl) / 6 + Math.abs(vs) / 3);
+      f.copy(nrm).multiplyScalar(Fz).addScaledVector(wf, Fx).addScaledVector(ws, Fy); F.add(f); r.y *= .45; Tq.add(tmp.crossVectors(r, f)); car.spin[i] += vl / RAD * h; }
+    F.addScaledVector(car.v, -.42 * car.v.length()); car.v.addScaledVector(F, h / M);
+    let wx = car.w.dot(bx) + Tq.dot(bx) / IX * h, wy = car.w.dot(by) + Tq.dot(by) / IY * h, wz = car.w.dot(bz) + Tq.dot(bz) / IZ * h; const dmp = 1 - h * (air === 4 ? .2 : 1.2); wx *= dmp; wz *= 1 - h * (air === 4 ? .2 : 2.6); wy *= 1 - h * .4;
+    car.w.set(0, 0, 0).addScaledVector(bx, wx).addScaledVector(by, wy).addScaledVector(bz, wz); car.p.addScaledVector(car.v, h);
+    dq.set(car.w.x * h * .5, car.w.y * h * .5, car.w.z * h * .5, 0).multiply(q); q.x += dq.x; q.y += dq.y; q.z += dq.z; q.w += dq.w; q.normalize(); car.slip = slip / 4; car.air = air;
+  }
+  function laps(dt) { const o = Island.nearRoad(car.p.x, car.p.z); car.off = o.d; if (o.d > 60) return; const n = RD.n, i = o.i; let di = i - lastI; if (di > n / 2) di -= n; if (di < -n / 2) di += n; prog += di;
+    if (lastI > n - 40 && i < 40 && di > 0) { if (lapOn && prog > n * .85) { last = lapT; if (!best || last < best) { best = last; try { localStorage.setItem('oneworld.bestLap', best.toFixed(3)); } catch (e) {} } } lapOn = true; lapT = 0; prog = 0; }
+    lastI = i; if (lapOn) lapT += dt; }
+  function sound() { const S = G.snd; if (!S || !S.ac || !S.out) return; const ac = S.ac;
+    if (!snd) { const nb = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate), d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const noise = (type, fq, q) => { const s = ac.createBufferSource(); s.buffer = nb; s.loop = true; const fl = ac.createBiquadFilter(); fl.type = type; fl.frequency.value = fq; fl.Q.value = q; const g = ac.createGain(); g.gain.value = 0; s.connect(fl); fl.connect(g); g.connect(S.out); s.start(); return g; };
+      const o1 = ac.createOscillator(), o2 = ac.createOscillator(), lp = ac.createBiquadFilter(), g = ac.createGain(); o1.type = 'sawtooth'; o2.type = 'square'; lp.type = 'lowpass'; g.gain.value = 0; o1.connect(lp); o2.connect(lp); lp.connect(g); g.connect(S.out); o1.start(); o2.start();
+      snd = { o1, o2, lp, g, tire: noise('bandpass', 1100, 4), wind: noise('lowpass', 520, .5) }; }
+    const now = ac.currentTime, act = on && !paused ? 1 : 0, fq = car.rpm / 60 * 2, sp = car.v.length();
+    snd.o1.frequency.setTargetAtTime(fq, now, .03); snd.o2.frequency.setTargetAtTime(fq * .5, now, .03); snd.lp.frequency.setTargetAtTime(500 + car.thr * 2600 + car.rpm * .25, now, .05); snd.g.gain.setTargetAtTime(act * (.03 + .06 * car.thr), now, .05);
+    snd.tire.gain.setTargetAtTime(act * Math.min(.14, car.slip * .2) * (car.surf === 0 ? 1 : .35), now, .05); snd.wind.gain.setTargetAtTime(act * Math.min(.1, Math.pow(sp / 45, 2) * .1), now, .1); }
+  // one frame: input, physics in small steps, the car's model, the camera, the readout. Returns a line for the mode readout.
+  function step(camera, dt) {
+    if (!grp) return ''; readInput();
+    if (!paused) { const te = G.tEnv === undefined ? G.t : G.tEnv; wet = sm(31.2, 36, te) * (1 - sm(68, 76, te));
+      bx.set(1, 0, 0).applyQuaternion(car.q); by.set(0, 1, 0).applyQuaternion(car.q); bz.set(0, 0, 1).applyQuaternion(car.q); control(dt);
+      for (let i = 0; i < 4; i++) { const L = WL[i], g = gnd[i]; A.copy(car.p).addScaledVector(bx, L.x).addScaledVector(by, L.y).addScaledVector(bz, L.z); const s0 = Island.surf(A.x, A.z), y0 = s0[0], ty = s0[1];
+        g[0] = y0; g[1] = (Island.surf(A.x + .4, A.z)[0] - y0) / .4; g[2] = (Island.surf(A.x, A.z + .4)[0] - y0) / .4; g[3] = A.x; g[4] = A.z; g[5] = ty; if (i === 0) car.surf = ty; }
+      const n = clamp(Math.ceil(dt * 240), 1, 12), h = dt / n; for (let i = 0; i < n; i++) sub(h); laps(dt);
+      car.bad = by.y < .3 || car.p.y < -1.2 ? car.bad + dt : 0; if (car.bad > 1.6 || !isFinite(car.p.x) || car.p.y < -6) back(); }
+    grp.position.copy(car.p); grp.quaternion.copy(car.q); wheels.forEach((w, i) => { w.position.set(WL[i].x, WL[i].y - car.len[i], WL[i].z); w.rotation.set(car.spin[i], i < 2 ? car.steer : 0, 0); });
+    const sp = car.v.length(), sgn = inp.look ? -1 : 1; dir.copy(bz); dir.y = 0; if (sp > 4) dir.lerp(tmp.copy(car.v).setY(0).normalize(), .35); dir.normalize();
+    if (camMode === 2) { camera.position.copy(car.p).addScaledVector(by, .64).addScaledVector(bz, .3); camera.quaternion.copy(car.q).multiply(QY); if (inp.look) camera.quaternion.multiply(QY); }
+    else { const dist = camMode ? 9.5 : 6.4, hgt = camMode ? 3.4 : 2.2; tgt.copy(car.p).addScaledVector(dir, -dist * sgn); tgt.y += hgt; if (!camInit) { camP.copy(tgt); camInit = true; } camP.lerp(tgt, 1 - Math.exp(-dt * 6));
+      camP.y = Math.max(camP.y, Island.surf(camP.x, camP.z)[0] + .7); camera.position.copy(camP); tgt.copy(car.p).addScaledVector(dir, 2.5 * sgn); tgt.y += .9; mm.lookAt(camP, tgt, YAX); camera.quaternion.setFromRotationMatrix(mm); }
+    camera.fov = lerp(58, 74, sm(0, 45, sp)); camera.near = .3;
+    const kmh = Math.round(sp * 3.6), bar = '▮'.repeat(Math.round(clamp(car.rpm / 7000) * 14)).padEnd(14, '▯');
+    hud.textContent = `${fmt(lapOn ? lapT : 0)}   이번 바퀴\n${fmt(last)}   지난 바퀴\n${fmt(best)}   최고 기록\n\n${bar}\n${car.gear < 0 ? 'R' : car.gear}단   ${String(kmh).padStart(3, ' ')} km/h` + (car.off > 9 ? '\nR  도로로 복귀' : '');
+    sound(); return ['아스팔트', '갓길', '풀밭', '모래'][car.surf] + (wet > .3 ? ' · 젖음' : '') + ' · C 카메라 · Esc 조작법';
+  }
+  function enter() { on = true; grp.visible = true; hud.style.display = ''; keys.clear(); camInit = false; }
+  function leave() { on = false; hud.style.display = 'none'; setPaused(false); keys.clear(); sound(); }
+  addEventListener('keydown', e => { if (!on || e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code);
+    if (e.code === 'KeyC' && !e.repeat) { camMode = (camMode + 1) % 3; camInit = false; } else if (e.code === 'KeyR' && !e.repeat) back(); else if (e.code === 'Escape') setPaused(!paused);
+    if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); });
+  addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
+  return { build, step, enter, leave, reset, car, get on() { return on; } };
+})();

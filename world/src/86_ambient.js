@@ -59,7 +59,7 @@ const Ambient = (() => {
   const btn = document.createElement('button'); btn.style.cssText = 'position:fixed;right:14px;top:14px;font:600 12px/1 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f3e6d2;background:rgba(14,12,10,.55);padding:9px 13px;border-radius:999px;border:1px solid rgba(243,217,189,.25);z-index:6;cursor:pointer';
   const paint = () => { btn.textContent = muted ? '소리 꺼짐' : '소리 켜짐'; btn.style.opacity = muted ? .7 : 1; btn.title = 'M'; };
   const setMuted = v => { muted = v; try { localStorage.setItem('oneworld.mute', v ? '1' : '0'); } catch (e) {} paint(); if (master) master.gain.setTargetAtTime(v ? 0 : 0.9, ac.currentTime, 0.08); pill(v ? 'sound off' : 'sound on', 1200); };
-  btn.addEventListener('pointerdown', e => e.stopPropagation()); btn.addEventListener('click', e => { e.stopPropagation(); setMuted(!muted); if (!muted) start(); btn.blur(); }); paint(); document.body.appendChild(btn);
+  btn.addEventListener('pointerdown', e => e.stopPropagation()); btn.addEventListener('click', e => { e.stopPropagation(); setMuted(!muted); if (!muted) start(); btn.blur(); }); paint(); document.body.appendChild(btn); G.snd = { get ac() { return ac; }, get out() { return master; } };
   addEventListener('pointerdown', start); addEventListener('keydown', e => { if (e.code === 'KeyM') { setMuted(!muted); if (!muted) start(); } else if (!ac && e.key !== ' ') start(); });
   setTimeout(() => { if (!ac) pill('click for sound'); }, 0);
   return { start, thunder };

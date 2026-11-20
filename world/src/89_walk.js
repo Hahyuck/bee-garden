@@ -27,7 +27,7 @@ const Walk = (() => {
     vel.lerp(wish, 1 - Math.exp(-dt * 7)); pos.addScaledVector(vel, dt);
     pos.y = clamp(pos.y, 1.2, 420); const cx = pos.x - 14, cz = pos.z + 100, r = Math.hypot(cx, cz); if (r > 1300) { pos.x = 14 + cx * 1300 / r; pos.z = -100 + cz * 1300 / r; }      // the sea is drawn out to here
     camera.position.copy(pos); camera.quaternion.setFromEuler(eu.set(pitch, yaw, 0)); }
-  addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (MOVE[e.code]) { if (!on) enter(); else wake(); e.preventDefault(); } if (e.code === 'KeyR') leave(); if (on) keys.add(e.code); });
+  addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey || G.drive) return; if (MOVE[e.code]) { if (!on) enter(); else wake(); e.preventDefault(); } if (e.code === 'KeyR') leave(); if (on) keys.add(e.code); });
   addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => { keys.clear(); drag = false; });
   addEventListener('pointerdown', e => { if (!on || e.pointerType === 'touch') return; drag = true; if (canvas && canvas.requestPointerLock && !document.pointerLockElement) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) {} } });
   addEventListener('pointerup', () => { drag = false; });
@@ -37,7 +37,7 @@ const Walk = (() => {
   const tOpt = { passive: false };
   addEventListener('touchstart', e => { touchUI = true; for (const t of e.changedTouches) TS.set(t.identifier, { side: t.clientX < innerWidth / 2 ? 0 : 1, x0: t.clientX, y0: t.clientY, x: t.clientX, y: t.clientY, moved: 0, at: e.timeStamp }); if (on) e.preventDefault(); }, tOpt);
   addEventListener('touchmove', e => { for (const t of e.changedTouches) { const s = TS.get(t.identifier); if (!s) continue; const dx = t.clientX - s.x, dy = t.clientY - s.y; s.x = t.clientX; s.y = t.clientY; s.moved += Math.abs(dx) + Math.abs(dy);
-      if (!on && s.moved > 14) enter(); if (!on) continue; if (s.moved > 14) wake();
+      if (!on && s.moved > 14 && !G.drive) enter(); if (!on) continue; if (s.moved > 14) wake();
       if (s.side) { yaw -= dx * 0.0052; pitch = clamp(pitch - dy * 0.0052, -1.45, 1.45); }
       else { const R = Math.min(innerWidth, innerHeight) * 0.16, ux = clamp((s.x - s.x0) / R, -1, 1), uy = clamp((s.y - s.y0) / R, -1, 1); tB = Math.abs(ux) < 0.12 ? 0 : ux; tA = Math.abs(uy) < 0.12 ? 0 : -uy; } }
     e.preventDefault(); }, tOpt);
