@@ -22,6 +22,7 @@
     ['차', 1, async () => Drive.build(scene)],
     ['소리', 1, async () => Sound.build()],
     ['렌즈', 1, async () => Post.build(R)],
+    ['비교 패널', 1, async () => LookPanel.build()],
   ];
   const t0 = performance.now(), total = STEPS.reduce((s, x) => s + x[1], 0); let done = 0;
   try { for (const [name, w, fn] of STEPS) { label.textContent = name; await tick(); const ts = performance.now(); await fn(k => { bar.style.width = ((done + w * k) / total * 100).toFixed(1) + '%'; }); done += w; bar.style.width = (done / total * 100).toFixed(1) + '%'; G.info[name] = Math.round(performance.now() - ts); } }

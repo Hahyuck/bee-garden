@@ -57,7 +57,8 @@ const NZ = (() => {
 })();
 
 // what every module can see. U holds the uniforms of the light and the air, fed to every material that is compiled.
-const G = { t: 0, tAbs: 0, day: 10, uTime: { value: 0 }, uGust: { value: 0 }, uWind: { value: 0 }, tick: [], info: {},
+const G = { t: 0, tAbs: 0, day: 10, look: { shadows: true, air: true, bounce: true, field: true, shafts: true, bloom: true, adapt: true, film: true },      // look: the parts of the lighting, each of which can be switched off to compare
+  uTime: { value: 0 }, uGust: { value: 0 }, uWind: { value: 0 }, tick: [], info: {},
   U: { uSunDir: { value: new THREE.Vector3(.4, .8, .45).normalize() }, uSunK: { value: new THREE.Vector3(1, 1, 1) }, uFogCol: { value: new THREE.Vector3(.62, .72, .85) }, uFogP: { value: new THREE.Vector4(.0004, .012, 0, 1) } } };
 
 const GLSL_NOISE = /* glsl */`
@@ -229,7 +230,7 @@ const Sky = (() => {
     // the air takes the horizon's colour, and thickens in rain and snow
     const wet = typeof Weather !== 'undefined' ? Math.max(Weather.S.rain, Weather.S.snowing * .8) : 0;
     G.U.uSunDir.value.copy(light); G.U.uSunK.value.set(sun.color.r, sun.color.g, sun.color.b).multiplyScalar(sun.intensity / Math.PI * .5); G.U.uFogCol.value.copy(U.uHor.value).multiplyScalar(.92);
-    G.U.uFogP.value.set(C.fogDensity * (1 + 7 * wet + 2 * storm), C.fogFalloff, 0, 1 - storm);
+    sun.castShadow = G.look.shadows; G.U.uFogP.value.set(G.look.air ? C.fogDensity * (1 + 7 * wet + 2 * storm) : 0, C.fogFalloff, 0, 1 - storm);
     drift += dt * (.004 + .012 * storm); U.uSkyP.value.set(cover, storm, night, drift); }
 
   addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === ']') G.day = (G.day + 1) % 24; else if (e.key === '[') G.day = (G.day + 23) % 24; else if (e.code === 'KeyT' && !e.repeat) flow = !flow; });
@@ -497,7 +498,7 @@ const Weather = (() => {
     drops.visible = S.rain > .01; if (drops.visible) { DU.uT.value = t; DU.uAmt.value = S.rain; DU.uPx.value = px; DU.uLum.value = lum; DU.uDrift.value.set(S.wind.x * .25 * t, -C.dropFall * t, S.wind.z * .25 * t); }
     // light that has touched the ground once: the sun's colour times the ground's, sent up into the fill from below. Snow on the ground
     // turns it from a dim earth-brown into a bright cold white; wet ground gives less back. (A stand-in for traced bounce light, not a tracer.)
-    if (G.hemi && G.sun) { const up = Math.max(0, _d.copy(G.sun.position).sub(G.sun.target.position).normalize().y), k = C.bounce * G.sun.intensity * up * (1 - .3 * S.wet) / Math.max(G.hemi.intensity, .05);
+    if (G.hemi && G.sun && G.look.bounce) { const up = Math.max(0, _d.copy(G.sun.position).sub(G.sun.target.position).normalize().y), k = C.bounce * G.sun.intensity * up * (1 - .3 * S.wet) / Math.max(G.hemi.intensity, .05);
       _a.setRGB(C.albedoGround[0], C.albedoGround[1], C.albedoGround[2]).lerp(_b.setRGB(C.albedoSnow[0], C.albedoSnow[1], C.albedoSnow[2]), S.cover); G.hemi.groundColor.r += G.sun.color.r * _a.r * k; G.hemi.groundColor.g += G.sun.color.g * _a.g * k; G.hemi.groundColor.b += G.sun.color.b * _a.b * k; }
     chipT -= dt; if (chipT <= 0) { chipT = .25; const h = Math.floor(G.day), mi = Math.floor((G.day - h) * 60); chip.textContent = `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')} · 날씨 ${NAME[S.mode]} · ${S.temp.toFixed(0)}°C · 바람 ${S.speed.toFixed(0)} m/s` + (S.rain > .05 ? ' · 비' : '') + (S.snowing > .05 ? ' · 눈' : '') + (S.cover > .01 ? ` · 적설 ${Math.round(S.cover * 100)}%` : '') + (S.ice > .01 ? ` · 빙결 ${Math.round(S.ice * 100)}%` : ''); } }
 
@@ -995,7 +996,7 @@ vec3 lfLight(vec3 irr, vec3 wp){
     for (let k = 0; k < N * N; k++) if (px[k * 4 + 1] === 0 && px[k * 4 + 3] === 0) { px[k * 4 + 1] = 127; px[k * 4 + 3] = 127; }
     const tex = new THREE.DataTexture(px, N, N, THREE.RGBAFormat); tex.magFilter = tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
     G.U.uLfTex.value = tex; G.U.uLfFrame.value.set(x0, z0, 1 / (N * CELL), Q.has('nofield') ? 0 : 1); G.info.lightField = { cells };
-    G.tick.push((t, dt) => { const s = G.sun, w = typeof Weather !== 'undefined' ? Weather.S.cover : 0, k = s.intensity * C.bounce;      // the canopy's colour, or the snow on it, times the sun
+    G.tick.push((t, dt) => { G.U.uLfFrame.value.w = G.look.field && !Q.has('nofield') ? 1 : 0; const s = G.sun, w = typeof Weather !== 'undefined' ? Weather.S.cover : 0, k = s.intensity * C.bounce;      // the canopy's colour, or the snow on it, times the sun
       G.U.uLfBounce.value.set(s.color.r * lerp(.1, .8, w), s.color.g * lerp(.15, .84, w), s.color.b * lerp(.05, .9, w)).multiplyScalar(k);
       for (let i = 0; i < 2; i++) if (HOT[i].w > 0) { hotT[i] += dt; HOT[i].w = Math.max(0, HOT[i].w - dt * HOT[i].w * 4 - dt * 2); } }); }
   // a hot spot: something burning at a place, lighting what is near it until it fades
@@ -1026,21 +1027,22 @@ void main(){ vec3 c = vec3(0.); for (int i = 0; i < 4; i++) { vec2 o = vec2(floa
   const BLUR = `varying vec2 vUv; uniform sampler2D tC; uniform vec2 uDir;
 void main(){ vec3 c = texture2D(tC, vUv).rgb * .227; c += (texture2D(tC, vUv + uDir * 1.385).rgb + texture2D(tC, vUv - uDir * 1.385).rgb) * .316;
   c += (texture2D(tC, vUv + uDir * 3.231).rgb + texture2D(tC, vUv - uDir * 3.231).rgb) * .0703; gl_FragColor = vec4(c, 1.); }`;
-  const FINAL = /* glsl */`varying vec2 vUv; uniform sampler2D tC, tB1, tB2, tD; uniform float uExp, uTime, uAspect, uVig, uGrain, uBloom, uShafts, uFringe; uniform vec2 uSunScr; uniform vec3 uShaftCol, uHeat[2];
+  const FINAL = /* glsl */`varying vec2 vUv; uniform sampler2D tC, tB1, tB2, tD; uniform float uExp, uTime, uAspect, uVig, uGrain, uBloom, uShafts, uFringe, uFilm; uniform vec2 uSunScr; uniform vec3 uShaftCol, uHeat[2];
 float hash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), 0., 1.); }
 void main(){ vec2 uv = vUv;
   // hot air in front of the lens bends what is behind it
   for (int i = 0; i < 2; i++) { vec2 d = uv - uHeat[i].xy; d.x *= uAspect; float mask = exp(-dot(d, d) / .012) * uHeat[i].z; uv.x += sin(uv.y * 205. + uTime * 46. + sin(uv.x * 90.)) * .0026 * mask; uv.y += sin(uv.x * 188. - uTime * 42.) * .0018 * mask; }
-  vec2 dir = uv - .5; float r = length(dir * vec2(uAspect, 1.)) / length(vec2(uAspect, 1.) * .5), ca = uFringe * r * r;
+  vec2 dir = uv - .5; float r = length(dir * vec2(uAspect, 1.)) / length(vec2(uAspect, 1.) * .5), ca = uFringe * r * r * uFilm;
   vec3 c = texture2D(tC, uv).rgb; c.r = texture2D(tC, uv + dir * ca).r; c.b = texture2D(tC, uv - dir * ca).b;
   vec3 col = c * uExp + (texture2D(tB1, uv).rgb * .16 + texture2D(tB2, uv).rgb * .2) * uBloom;
   // shafts of light: walk from the pixel towards the sun on screen; wherever the sky shows through (nothing in the depth), light gets past
   if (uShafts > .001) { vec2 toSun = uSunScr - uv; float tr = 0.;
     for (int i = 0; i < 14; i++) { float f = (float(i) + .5) / 14.; vec2 q = uv + toSun * f * .88; float open = step(.99997, texture2D(tD, q).r) * step(0., q.x) * step(q.x, 1.) * step(0., q.y) * step(q.y, 1.); tr += open * (.12 + min(1.5, texture2D(tB2, q).r)) * (1. - f * .68); }
     col += uShaftCol * tr / 14. * uShafts * exp(-length(toSun * vec2(uAspect, 1.)) * 2.5); }
-  col *= 1. - uVig * pow(r, 2.6); col = aces(col * 1.05); float l = dot(col, vec3(.2126, .7152, .0722)); col = mix(vec3(l), col, 1.1);
-  col = pow(max(col, 0.), vec3(1. / 2.2)); col += (hash12(gl_FragCoord.xy + fract(uTime * 3.17) * 517.) - .5) * uGrain; gl_FragColor = vec4(col, 1.); }`;
+  vec3 plain = clamp(col, 0., 1.);                                    // without the film: the light as it is, cut off at white
+  col *= 1. - uVig * pow(r, 2.6); col = aces(col * 1.05); float l = dot(col, vec3(.2126, .7152, .0722)); col = mix(vec3(l), col, 1.1); col = mix(plain, col, uFilm);
+  col = pow(max(col, 0.), vec3(1. / 2.2)); col += (hash12(gl_FragCoord.xy + fract(uTime * 3.17) * 517.) - .5) * uGrain * uFilm; gl_FragColor = vec4(col, 1.); }`;
   const heatP = [{ p: new THREE.Vector3(), k: 0 }, { p: new THREE.Vector3(), k: 0 }], _s = new THREE.Vector3();
   let R, quad, qcam, qscene, rtMain, rtDof, b1a, b1b, b2a, b2b, W = 0, H = 0, exp = C.exposure;
   const lens = { focus: 10, aperture: 0 };       // a mode sets these; aperture 0 means no depth of field
@@ -1049,7 +1051,7 @@ void main(){ vec2 uv = vUv;
   function build(renderer) { R = renderer; qcam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1); qscene = new THREE.Scene(); quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); quad.frustumCulled = false; qscene.add(quad);
     M.dof = mat(DOF, { tC: { value: null }, tD: { value: null }, uRes: { value: new THREE.Vector2() }, uNear: { value: .3 }, uFar: { value: 1 }, uFocus: { value: 1 }, uApK: { value: 0 }, uMaxC: { value: 14 }, uStep: { value: 1.1 }, uJit: { value: 0 } });
     M.bright = mat(BRIGHT, { tC: { value: null }, uPx: { value: new THREE.Vector2() }, uExp: { value: 1 } }); M.blur = mat(BLUR, { tC: { value: null }, uDir: { value: new THREE.Vector2() } });
-    M.fin = mat(FINAL, { tC: { value: null }, tB1: { value: null }, tB2: { value: null }, uExp: { value: 1 }, uTime: G.uTime, uAspect: { value: 1 }, uVig: { value: C.vignette }, uGrain: { value: C.grain }, uBloom: { value: C.bloom }, uFringe: { value: C.fringe }, tD: { value: null }, uShafts: { value: 0 }, uSunScr: { value: new THREE.Vector2() }, uShaftCol: { value: new THREE.Vector3() }, uHeat: { value: [new THREE.Vector3(), new THREE.Vector3()] } }); }
+    M.fin = mat(FINAL, { tC: { value: null }, tB1: { value: null }, tB2: { value: null }, uExp: { value: 1 }, uTime: G.uTime, uAspect: { value: 1 }, uVig: { value: C.vignette }, uGrain: { value: C.grain }, uBloom: { value: C.bloom }, uFringe: { value: C.fringe }, uFilm: { value: 1 }, tD: { value: null }, uShafts: { value: 0 }, uSunScr: { value: new THREE.Vector2() }, uShaftCol: { value: new THREE.Vector3() }, uHeat: { value: [new THREE.Vector3(), new THREE.Vector3()] } }); }
   // heat(world position, strength): the air shimmers there for a second or two
   function heat(p, k) { const h = heatP[0].k <= heatP[1].k ? heatP[0] : heatP[1]; h.p.copy(p); h.k = k; }
   function size() { const s = R.getDrawingBufferSize(new THREE.Vector2()), w = Math.max(8, s.x), h = Math.max(8, s.y); if (rtMain && w === W && h === H) return; W = w; H = h; for (const t of [rtMain, rtDof, b1a, b1b, b2a, b2b]) if (t) t.dispose();
@@ -1060,14 +1062,14 @@ void main(){ vec2 uv = vUv;
   function render(scene, camera, dt) { size(); R.setRenderTarget(rtMain); R.render(scene, camera); let src = rtMain;
     if (lens.aperture > 0) { const u = M.dof.uniforms; u.tC.value = rtMain.texture; u.tD.value = rtMain.depthTexture; u.uRes.value.set(W, H); u.uNear.value = camera.near; u.uFar.value = camera.far; u.uFocus.value = lens.focus; u.uApK.value = lens.aperture * H / 900; u.uMaxC.value = 14 * H / 900; u.uJit.value = G.t; pass(M.dof, rtDof); src = rtDof; }
     // exposure follows the light slowly, as an eye does: open at night, stopped down at noon
-    const day = G.hemi ? clamp(G.hemi.intensity / CFG.sky.fillIntensity) : 1, want = C.exposure * lerp(C.nightGain, 1, sm(.08, .7, day)) * (1 - C.snowStop * (typeof Weather !== 'undefined' ? Weather.S.cover : 0) * day);      // and stopped down again over snow exp += (want - exp) * (1 - Math.exp(-(dt || .016) / 1.5));
+    const day = G.hemi ? clamp(G.hemi.intensity / CFG.sky.fillIntensity) : 1, want = C.exposure * lerp(C.nightGain, 1, sm(.08, .7, day)) * (1 - C.snowStop * (typeof Weather !== 'undefined' ? Weather.S.cover : 0) * day);      // and stopped down again over snow if (G.look.adapt) exp += (want - exp) * (1 - Math.exp(-(dt || .016) / 1.5)); else exp = C.exposure;
     M.bright.uniforms.tC.value = src.texture; M.bright.uniforms.uPx.value.set(1 / W, 1 / H); M.bright.uniforms.uExp.value = exp; pass(M.bright, b1a);
     const bl = (from, to, x, y) => { M.blur.uniforms.tC.value = from.texture; M.blur.uniforms.uDir.value.set(x, y); pass(M.blur, to); };
     bl(b1a, b1b, 1 / b1a.width, 0); bl(b1b, b1a, 0, 1 / b1a.height); bl(b1a, b2b, 1 / b2a.width, 0); bl(b2b, b2a, 0, 1 / b2a.height);
-    const f = M.fin.uniforms; f.tC.value = src.texture; f.tB1.value = b1a.texture; f.tB2.value = b2a.texture; f.uExp.value = exp; f.uAspect.value = W / H; f.tD.value = rtMain.depthTexture;
+    const f = M.fin.uniforms; f.tC.value = src.texture; f.tB1.value = b1a.texture; f.tB2.value = b2a.texture; f.uExp.value = exp; f.uAspect.value = W / H; f.tD.value = rtMain.depthTexture; f.uBloom.value = G.look.bloom ? C.bloom : 0; f.uFilm.value = G.look.film ? 1 : 0;
     // where the sun is on the screen, and whether its shafts can be seen: low sun, in front of the lens, not behind a storm
     { const sd = Sky.sunDir, st = typeof Weather !== 'undefined' ? Weather.S.storm : 0; _s.copy(camera.position).addScaledVector(sd, 1000).project(camera); const front = _s.z < 1 && Math.abs(_s.x) < 1.6 && Math.abs(_s.y) < 1.6;
-      f.uShafts.value = front ? C.shafts * sm(-.03, .08, sd.y) * (1 - sm(.35, .8, sd.y)) * (1 - st) * (lens.aperture > 0 ? 0 : 1) : 0; f.uSunScr.value.set(_s.x * .5 + .5, _s.y * .5 + .5); f.uShaftCol.value.copy(Sky.U.uSkyK.value).multiplyScalar(1.4); }
+      f.uShafts.value = front && G.look.shafts ? C.shafts * sm(-.03, .08, sd.y) * (1 - sm(.35, .8, sd.y)) * (1 - st) * (lens.aperture > 0 ? 0 : 1) : 0; f.uSunScr.value.set(_s.x * .5 + .5, _s.y * .5 + .5); f.uShaftCol.value.copy(Sky.U.uSkyK.value).multiplyScalar(1.4); }
     heatP.forEach((h, i) => { h.k = Math.max(0, h.k - (dt || .016) * .7); _s.copy(h.p).project(camera); f.uHeat.value[i].set(_s.x * .5 + .5, _s.y * .5 + .5, _s.z < 1 ? h.k * clamp(18 / Math.max(camera.position.distanceTo(h.p), 4)) : 0); });
     pass(M.fin, null); }
   return { build, render, lens, heat };
@@ -1133,6 +1135,38 @@ const FX = (() => {
       s.shell.visible = s.ring.visible = true; s.shell.scale.set(r * .7, r * .6, r * .7); s.ring.scale.setScalar(r * 1.1);
       for (const m of [s.shell, s.ring]) { m.material.uniforms.phase.value = t * 3; m.material.uniforms.tint.value.setRGB(lerp(3.2, .9, k), lerp(1.7, .5, k), lerp(.5, .35, k)); } s.shell.material.uniforms.strength.value = fade * .9; s.ring.material.uniforms.strength.value = fade * .8; } }
   return { build, trail, blast };
+})();
+
+// ===== 84_lookpanel.js =====
+
+// ---- a panel to compare the light with and without each of its parts. Every part of the lighting reads a switch in G.look;
+//      the buttons flip them, and two presets set them all: the plain light the engine started from, and everything on.
+//      L hides the panel. To make something new comparable, add a key to G.look, read it where the effect is made, and list it in PARTS. ----
+const LookPanel = (() => {
+  const PARTS = [
+    ['shadows', '그림자', '해가 드리우는 그림자'],
+    ['air', '공기', '거리와 높이에 따른 안개, 해 쪽으로 밝아지는 대기'],
+    ['bounce', '땅의 되비침', '해의 색 × 땅의 색을 아래쪽 보조광에 더함 (눈이 쌓이면 희어짐)'],
+    ['field', '빛 필드', '숲 아래 하늘빛 가림 + 해 받은 숲이 옆으로 돌려주는 빛'],
+    ['shafts', '빛기둥', '해가 낮을 때 나무·능선 사이로 새는 빛줄기'],
+    ['bloom', '블룸', '흰색보다 밝은 곳이 번지는 빛'],
+    ['adapt', '노출 적응', '밤에 열리고 낮과 눈 위에서 조이는 노출'],
+    ['film', '필름', 'ACES 톤 곡선, 비네트, 색 번짐, 그레인'],
+  ];
+  const btn = {}, css = 'font:600 12px/1.3 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;border:1px solid rgba(243,217,189,.25);border-radius:8px;padding:5px 9px;cursor:pointer;text-align:left;';
+  const box = document.createElement('div'); box.style.cssText = 'position:fixed;left:14px;top:12px;z-index:6;display:flex;flex-direction:column;gap:5px;background:rgba(14,12,10,.6);padding:9px;border-radius:11px;border:1px solid rgba(243,217,189,.18);max-width:190px';
+  const title = document.createElement('div'); title.textContent = '라이팅 비교 (L)'; title.style.cssText = 'font:700 12px "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f6ead0;opacity:.8;margin-bottom:2px'; box.appendChild(title);
+  const paint = () => { for (const [k, name] of PARTS) { const on = G.look[k]; btn[k].textContent = (on ? '● ' : '○ ') + name; btn[k].style.background = on ? 'rgba(232,181,74,.28)' : 'rgba(14,12,10,.4)'; btn[k].style.opacity = on ? 1 : .7; } };
+  const make = (text, fn, tip) => { const b = document.createElement('button'); b.textContent = text; b.title = tip || ''; b.style.cssText = css + 'background:rgba(14,12,10,.4)'; b.addEventListener('click', e => { e.stopPropagation(); fn(); paint(); b.blur(); }); b.addEventListener('pointerdown', e => e.stopPropagation()); box.appendChild(b); return b; };
+  const all = v => { for (const [k] of PARTS) G.look[k] = v; };
+  const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:5px'; box.appendChild(row);
+  const preset = (text, fn, tip) => { const b = make(text, fn, tip); b.style.flex = '1'; b.style.textAlign = 'center'; row.appendChild(b); };
+  preset('기본 조명', () => { all(false); G.look.shadows = true; }, '해 하나, 하늘·땅 보조광, 그림자만. 나머지는 모두 끔');
+  preset('전부 켜기', () => all(true), '지금 엔진의 라이팅 전부');
+  for (const [k, name, tip] of PARTS) btn[k] = make(name, () => { G.look[k] = !G.look[k]; }, tip);
+  function build() { document.body.appendChild(box); paint(); if (Q.has('nopanel')) box.style.display = 'none'; { const q = Q.get('look'); if (q === 'plain') { all(false); G.look.shadows = true; paint(); } } }
+  addEventListener('keydown', e => { if (e.code === 'KeyL' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) box.style.display = box.style.display === 'none' ? 'flex' : 'none'; });
+  return { build, paint, all };
 })();
 
 // ===== 85_phys.js =====
@@ -1470,6 +1504,7 @@ const Modes = (() => {
     ['차', 1, async () => Drive.build(scene)],
     ['소리', 1, async () => Sound.build()],
     ['렌즈', 1, async () => Post.build(R)],
+    ['비교 패널', 1, async () => LookPanel.build()],
   ];
   const t0 = performance.now(), total = STEPS.reduce((s, x) => s + x[1], 0); let done = 0;
   try { for (const [name, w, fn] of STEPS) { label.textContent = name; await tick(); const ts = performance.now(); await fn(k => { bar.style.width = ((done + w * k) / total * 100).toFixed(1) + '%'; }); done += w; bar.style.width = (done / total * 100).toFixed(1) + '%'; G.info[name] = Math.round(performance.now() - ts); } }

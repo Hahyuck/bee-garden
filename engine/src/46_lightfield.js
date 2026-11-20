@@ -29,7 +29,7 @@ vec3 lfLight(vec3 irr, vec3 wp){
     for (let k = 0; k < N * N; k++) if (px[k * 4 + 1] === 0 && px[k * 4 + 3] === 0) { px[k * 4 + 1] = 127; px[k * 4 + 3] = 127; }
     const tex = new THREE.DataTexture(px, N, N, THREE.RGBAFormat); tex.magFilter = tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
     G.U.uLfTex.value = tex; G.U.uLfFrame.value.set(x0, z0, 1 / (N * CELL), Q.has('nofield') ? 0 : 1); G.info.lightField = { cells };
-    G.tick.push((t, dt) => { const s = G.sun, w = typeof Weather !== 'undefined' ? Weather.S.cover : 0, k = s.intensity * C.bounce;      // the canopy's colour, or the snow on it, times the sun
+    G.tick.push((t, dt) => { G.U.uLfFrame.value.w = G.look.field && !Q.has('nofield') ? 1 : 0; const s = G.sun, w = typeof Weather !== 'undefined' ? Weather.S.cover : 0, k = s.intensity * C.bounce;      // the canopy's colour, or the snow on it, times the sun
       G.U.uLfBounce.value.set(s.color.r * lerp(.1, .8, w), s.color.g * lerp(.15, .84, w), s.color.b * lerp(.05, .9, w)).multiplyScalar(k);
       for (let i = 0; i < 2; i++) if (HOT[i].w > 0) { hotT[i] += dt; HOT[i].w = Math.max(0, HOT[i].w - dt * HOT[i].w * 4 - dt * 2); } }); }
   // a hot spot: something burning at a place, lighting what is near it until it fades

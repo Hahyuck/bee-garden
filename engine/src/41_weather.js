@@ -47,7 +47,7 @@ const Weather = (() => {
     drops.visible = S.rain > .01; if (drops.visible) { DU.uT.value = t; DU.uAmt.value = S.rain; DU.uPx.value = px; DU.uLum.value = lum; DU.uDrift.value.set(S.wind.x * .25 * t, -C.dropFall * t, S.wind.z * .25 * t); }
     // light that has touched the ground once: the sun's colour times the ground's, sent up into the fill from below. Snow on the ground
     // turns it from a dim earth-brown into a bright cold white; wet ground gives less back. (A stand-in for traced bounce light, not a tracer.)
-    if (G.hemi && G.sun) { const up = Math.max(0, _d.copy(G.sun.position).sub(G.sun.target.position).normalize().y), k = C.bounce * G.sun.intensity * up * (1 - .3 * S.wet) / Math.max(G.hemi.intensity, .05);
+    if (G.hemi && G.sun && G.look.bounce) { const up = Math.max(0, _d.copy(G.sun.position).sub(G.sun.target.position).normalize().y), k = C.bounce * G.sun.intensity * up * (1 - .3 * S.wet) / Math.max(G.hemi.intensity, .05);
       _a.setRGB(C.albedoGround[0], C.albedoGround[1], C.albedoGround[2]).lerp(_b.setRGB(C.albedoSnow[0], C.albedoSnow[1], C.albedoSnow[2]), S.cover); G.hemi.groundColor.r += G.sun.color.r * _a.r * k; G.hemi.groundColor.g += G.sun.color.g * _a.g * k; G.hemi.groundColor.b += G.sun.color.b * _a.b * k; }
     chipT -= dt; if (chipT <= 0) { chipT = .25; const h = Math.floor(G.day), mi = Math.floor((G.day - h) * 60); chip.textContent = `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')} · 날씨 ${NAME[S.mode]} · ${S.temp.toFixed(0)}°C · 바람 ${S.speed.toFixed(0)} m/s` + (S.rain > .05 ? ' · 비' : '') + (S.snowing > .05 ? ' · 눈' : '') + (S.cover > .01 ? ` · 적설 ${Math.round(S.cover * 100)}%` : '') + (S.ice > .01 ? ` · 빙결 ${Math.round(S.ice * 100)}%` : ''); } }
 
