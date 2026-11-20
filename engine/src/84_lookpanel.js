@@ -34,7 +34,7 @@ const LookPanel = (() => {
   preset('기본 조명', () => { all(false); G.look.shadows = true; }, '해 하나, 하늘·땅 보조광, 그림자만. 나머지는 모두 끔');
   preset('전부 켜기', () => all(true), '지금 엔진의 라이팅 전부');
   for (const [k, name, tip] of PARTS) btn[k] = make(name, () => { G.look[k] = !G.look[k]; }, tip);
-  function build() { document.body.appendChild(box); paint(); expand(innerWidth >= 700); if (Q.has('nopanel')) box.style.display = 'none'; { const q = Q.get('look'); if (q === 'plain') { all(false); G.look.shadows = true; paint(); } } }
+  function build() { box.id='lighting-panel';const close=document.createElement('button');close.textContent='조명 설정 닫기';close.style.cssText=css+'background:#254039';close.onclick=()=>box.style.display='none';box.append(close);document.body.appendChild(box);paint();expand(true);box.style.display='none';if(Q.get('look')==='plain'){all(false);G.look.shadows=true;paint();} }
   addEventListener('keydown', e => { if (e.code === 'KeyL' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) box.style.display = box.style.display === 'none' ? 'flex' : 'none'; });
-  return { build, paint, all };
+  return { build, paint, all, open(){box.style.display='flex';expand(true);} };
 })();

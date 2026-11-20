@@ -77,5 +77,5 @@ vec3 seaWave(vec2 p, float far, float calm){      // xy: slope, z: height
     }
     return C.level+amp*wave*sm(.05,3,C.level-Island.surf(x,z)[0]);
   }
-  return { build, bake, height };
+  return { build, bake, height, waves:WAVES, get waveUniforms(){return U;} };
 })();

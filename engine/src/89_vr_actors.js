@@ -1,32 +1,57 @@
 'use strict';
 const ActorWalk = (() => {
   const group = new THREE.Group();
-  const feet = new THREE.Vector3(), frogFeet = new THREE.Vector3();
-  const hopStart = new THREE.Vector3(), hopEnd = new THREE.Vector3();
+  const feet = new THREE.Vector3();
   const target = new THREE.Vector3(), eye = new THREE.Vector3(), ray = new THREE.Vector3();
   const probe = new THREE.Vector3(), down = new THREE.Vector3(0,-1,0), up = new THREE.Vector3(0,1,0);
   const walkSpeed = 1.85, runSpeed = 4.15, crouchSpeed = .86;
   const gravity = 12.8, takeoffSpeed = 5.15, windup = .08, recovery = .16;
-  const actors = { human: null, frog: null };
+  let player = null;
   let active = false, placed = false, azimuth = 0, pitch = .27, facing = 0;
   let orbitPointer = null, pointerX = 0, pointerY = 0, cameraReady = false;
-  let selectedHuman = null, humanVersion = 0, pendingHuman = null, frogLoading = false, status = '';
-  let hopTime = -1, jumpStage = 'ground', stageTime = 0, verticalSpeed = 0;
+  let selectedHuman = null, humanVersion = 0, pendingHuman = null, status = '';
+  let jumpStage = 'ground', stageTime = 0, verticalSpeed = 0;
   let capsuleHeight = 1.71, capsuleRadius = .26, crouchActive = false;
   let supportY = 0, jumpPressed = false, lowCamera = 0, fastCamera = 0;
   let firstPerson = false, savedWalk = null, extraFloor = null;
+  let climbing=false,climbPhase=0,regrabDelay=0;
+  const wallDir=new THREE.Vector3(),ledge=new THREE.Vector3(),reachPoint=new THREE.Vector3();
+  function climbClip(model,clips){
+    const authored=clips.find(c=>/climb/i.test(c.name));if(authored)return authored;
+    const tracks=[],times=[0,.125,.25,.375,.5,.625,.75,.875,1],rot=new THREE.Quaternion(),e=new THREE.Euler();
+    model.traverse(b=>{
+      if(!b.isBone)return;
+      const limb=b.name.match(/(Left|Right)(UpLeg|Leg|ForeArm|Arm)$/i);if(!limb)return;
+      const sign=limb[1].toLowerCase()==='left'?1:-1,values=[];
+      for(const t of times){
+        const w=sign*Math.cos(t*TAU);
+        switch(limb[2].toLowerCase()){
+          case 'arm':e.set(2.15+.48*w,0,sign*.92);break;
+          case 'forearm':e.set(0,-sign*(.78-.38*w),0);break;
+          case 'upleg':e.set(.72-.41*w,0,sign*.10);break;
+          case 'leg':e.set(-1.05+.45*w,0,0);break;
+        }
+        values.push(...rot.setFromEuler(e).toArray());
+      }
+      tracks.push(new THREE.QuaternionKeyframeTrack(b.uuid+'.quaternion',times,values));
+    });
+    return new THREE.AnimationClip('WallClimb',1,tracks);
+  }
   function surface(x,z) {
     const y = Island.support(x,z), extra = extraFloor?.(x,z);
     return Number.isFinite(extra) ? Math.max(y,extra) : y;
   }
 
-  function humanActions(mixer, clips, imported) {
+  function characterActions(mixer, clips, entry) {
     const names = {idle:'TrailIdle', walk:'TrailWalk', run:'TrailRun', jump:'TrailJump',
       crouch:'TrailCrouch', crouchWalk:'TrailCrouchWalk'};
     const actions = {};
     for (const [key,name] of Object.entries(names)) {
       let clip = THREE.AnimationClip.findByName(clips,name);
-      if(!clip && imported){
+      if(entry?.species==='frog'){
+        const idle=key==='idle'||key==='crouch';
+        clip=THREE.AnimationClip.findByName(clips,idle?'CreekIdle':'CreekHop')?.clone();
+      }else if(!clip && entry?.custom){
         const aliases={idle:/idle|stand|rest/i,walk:/walk/i,run:/run|jog|walk/i,jump:/jump|leap/i,crouch:/crouch.?idle|squat|crouch$/i,crouchWalk:/crouch.*walk|sneak|walk/i};
         const usable=clips.find(a=>aliases[key].test(a.name)) || clips.find(a=>aliases.idle.test(a.name));
         clip=usable?.clone() || new THREE.AnimationClip(name,1,[]);
@@ -59,7 +84,8 @@ const ActorWalk = (() => {
     for (const s of skeletons) s.dispose();
   }
 
-  async function loadActor(kind, entry) {
+  async function loadActor(entry) {
+    const kind=entry?.species==='frog'?'frog':'human';
     const loader = window.createGardenGLTFLoader(THREE);
     const { scene: model, animations } = await loader.loadAsync(entry?.file || window.GARDEN_ACTORS[kind]);
     const bounds = new THREE.Box3().setFromObject(model, true);
@@ -72,38 +98,33 @@ const ActorWalk = (() => {
     const holder = new THREE.Group(); holder.name = kind; holder.add(model);
     const mixer = new THREE.AnimationMixer(model);
     const motion = animations.find(a => (kind === 'human' ? /walk/i : /hop/i).test(a.name));
-    const idle = animations.find(a => /idle/i.test(a.name));
-    const actions = kind === 'human' ? humanActions(mixer,animations,entry?.custom) : null;
-    const rest = !actions && idle && mixer.clipAction(idle).play();
-    const move = !actions && motion && mixer.clipAction(motion).setEffectiveWeight(0).play();
+    const actions=characterActions(mixer,animations,entry);
+    const climbingClip=climbClip(model,animations);
+    actions.climb=mixer.clipAction(climbingClip).setEffectiveWeight(0).play();
+    actions.climb.setEffectiveTimeScale(0);
     mixer.update(0);
-    const soles = actions ? Footing.bind(model) : null;
-    return { holder, model, mixer, actions, rest, move, entry, kind, motion, soles, fresh: true,
-      scaleY:model.scale.y,baseY:model.position.y,approxCrouch:entry?.custom&&!animations.some(a=>/crouch|squat|sneak/i.test(a.name))};
+    const soles = Footing.bind(model);
+    return { holder, model, mixer, actions, entry, kind, motion, soles, fresh: true,
+      scaleY:model.scale.y,baseY:model.position.y,approxCrouch:(entry?.custom||kind==='frog')&&!animations.some(a=>/crouch|squat|sneak/i.test(a.name))};
   }
 
   function install(actor) {
-    release(actors[actor.kind]);
-    actors[actor.kind] = actor;
-    actor.holder.visible = actor.kind === 'human' ? !firstPerson : !savedWalk;
-    actor.holder.position.copy(actor.kind === 'human' ? feet : frogFeet);
-    actor.holder.rotation.y = facing;
-    group.add(actor.holder);
-    if (actors.human && actors.frog) G.info.actorModels = Object.values(actors).map(a => ({
-      kind: a.kind, id: a.entry?.id || a.kind, clip: a.motion?.name || ''
-    }));
+    release(player);player=actor;
+    actor.holder.visible=!firstPerson;
+    actor.holder.position.copy(feet);actor.holder.rotation.y=facing;group.add(actor.holder);
+    G.info.actorModels=[{kind:actor.kind,id:actor.entry?.id||actor.kind,clip:actor.motion?.name||''}];
   }
 
   async function swapHuman(entry, version) {
     status = '캐릭터를 불러오는 중';
     try {
-      const actor = await loadActor('human', entry);
+      const actor = await loadActor(entry);
       if (version !== humanVersion) { release(actor); return false; }
       install(actor); status = '';
       return true;
     } catch (error) {
       if (version === humanVersion) {
-        selectedHuman = actors.human?.entry || null;
+        selectedHuman = player?.entry || null;
         WalkActions.setCharacter(selectedHuman?.id || 'kate');
         status = '캐릭터를 불러오지 못했습니다. 캐릭터 변경에서 다시 선택하세요.';
         console.error('Character model', error);
@@ -119,20 +140,12 @@ const ActorWalk = (() => {
     if (pendingHuman?.id === id) return pendingHuman.promise;
     const version = ++humanVersion;
     selectedHuman = entry;
-    if (actors.human && actors.human.entry?.id === entry?.id) {
+    if (player && player.entry?.id === entry?.id) {
       status = ''; pendingHuman = null; return Promise.resolve(true);
     }
     const promise = swapHuman(entry, version);
     pendingHuman = {id, promise};
     return promise;
-  }
-
-  async function loadFrog() {
-    if (actors.frog || frogLoading) return;
-    frogLoading = true;
-    try { install(await loadActor('frog', null)); }
-    catch (error) { console.warn('Froggy model', error); }
-    finally { frogLoading = false; }
   }
 
   function stopOrbit() {
@@ -141,17 +154,16 @@ const ActorWalk = (() => {
   }
   addEventListener('pointerdown', e => {
     if (!active || e.target !== G.R.domElement || orbitPointer !== null || e.button !== 0) return;
-    if (firstPerson && e.pointerType === 'mouse' && !document.pointerLockElement)
-      e.target.requestPointerLock?.()?.catch?.(() => {});
-    if (firstPerson && e.pointerType==='mouse') return;
+    if (firstPerson && (e.pointerType==='mouse' || PulseRange.paused)) return;
     orbitPointer = e.pointerId; pointerX = e.clientX; pointerY = e.clientY;
     if (!firstPerson || e.pointerType !== 'mouse') e.target.setPointerCapture(e.pointerId);
   });
+  // Locked mice send relative mouse movement even at the physical screen edge.
+  document.addEventListener('mousemove',e=>{
+    if(!active||!firstPerson||PulseRange.paused||document.pointerLockElement!==G.R.domElement)return;
+    azimuth-=e.movementX*.0026;pitch=clamp(pitch-e.movementY*.0026,-1.34,1.34);
+  });
   addEventListener('pointermove', e => {
-    if (active && firstPerson && e.pointerType==='mouse' &&
-        (document.pointerLockElement === G.R.domElement || e.target===G.R.domElement)) {
-      azimuth -= e.movementX*.0026; pitch = clamp(pitch-e.movementY*.0026,-1.34,1.34); return;
-    }
     if (e.pointerId !== orbitPointer) return;
     azimuth -= (e.clientX - pointerX) * .006;
     const dy=e.clientY-pointerY;
@@ -180,24 +192,21 @@ const ActorWalk = (() => {
       placed = true; facing = azimuth = -2.68;
       feet.set(Island.GP.x + 4, 0, Island.GP.z + 5);
       feet.y = surface(feet.x,feet.z);
-      frogFeet.set(feet.x - .97, 0, feet.z + .64);
-      frogFeet.y = Island.surf(frogFeet.x, frogFeet.z)[0];
     }
     supportY = feet.y;
-    if (actors.human) actors.human.holder.visible = !firstPerson;
-    if (actors.frog) actors.frog.holder.visible = !savedWalk;
+    if (player) player.holder.visible = !firstPerson;
     WalkStick.setActive(true); WalkActions.setActive(true);
     WalkActions.setCharacter(selectedHuman?.id || 'kate');
-    if (!actors.human) selectHuman(selectedHuman);
-    if (!savedWalk) loadFrog();
+    if (!player) selectHuman(selectedHuman);
   }
   function leave() {
+    climbing=false;
     active = group.visible = false;
-    Phys.stopPlayer(); Phys.setCompanion(null); crouchActive=false;
+    Phys.stopPlayer(); crouchActive=false;
     clearInput(); WalkStick.setActive(false); WalkActions.setActive(false);
     if (jumpStage !== 'ground') feet.y = supportY;
     jumpStage = 'ground'; stageTime = verticalSpeed = lowCamera = fastCamera = 0;
-    if (actors.human) actors.human.fresh = true;
+    if (player) player.fresh = true;
   }
 
   function floorAt(x, z, from) {
@@ -250,6 +259,7 @@ const ActorWalk = (() => {
     const keys = Modes.keys;
     let x = WalkStick.x + Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft'));
     let z = WalkStick.y + Number(keys.has('KeyW') || keys.has('ArrowUp')) - Number(keys.has('KeyS') || keys.has('ArrowDown'));
+    if(x===0&&z===0)return 0;
     const length = Math.max(1, Math.hypot(x,z));
     x /= length; z /= length;
     const yaw=VisualStyle.walkYaw()??azimuth,cosine=Math.cos(yaw),sine=Math.sin(yaw);
@@ -295,9 +305,48 @@ const ActorWalk = (() => {
     }
   }
 
+  function touchesWall(dir,height){
+    const reach=capsuleRadius+.23;
+    reachPoint.copy(feet).addScaledVector(dir,reach);reachPoint.y=feet.y+height;
+    if(surface(reachPoint.x,reachPoint.z)>reachPoint.y+.02)return true;
+    probe.copy(feet);probe.y=reachPoint.y;
+    return !!Phys.ray(probe,dir,reach,true);
+  }
+  function forwardInput(){
+    return WalkStick.y+Number(Modes.keys.has('KeyW')||Modes.keys.has('ArrowUp'))-Number(Modes.keys.has('KeyS')||Modes.keys.has('ArrowDown'));
+  }
+  function canGrab(){
+    if(Modes.cur!=='actors'||forwardInput()<.2)return false;
+    const yaw=VisualStyle.walkYaw()??azimuth;wallDir.set(-Math.sin(yaw),0,-Math.cos(yaw));
+    return touchesWall(wallDir,.5*capsuleHeight)&&touchesWall(wallDir,1.24);
+  }
+  function climbStep(dt,release){
+    if(release){climbing=false;regrabDelay=.55;jumpStage='air';verticalSpeed=0;return;}
+    const input=clamp(forwardInput(),-1,1),dy=input*1.58*dt;
+    facing=Math.atan2(-wallDir.x,-wallDir.z);
+    if(input<0&&feet.y<=stanceFloor(feet.x,feet.z,feet.y+.08)+.03){climbing=false;jumpStage='ground';return;}
+    // Inspect the top before a pull-up. Both the landing space and the path to it must be clear.
+    ledge.copy(feet).addScaledVector(wallDir,capsuleRadius*2+.27);
+    const top=floorAt(ledge.x,ledge.z,feet.y+.42);
+    if(input>0&&!touchesWall(wallDir,.43)&&top>=feet.y-.14&&top<=feet.y+.39){
+      ledge.y=Math.max(feet.y,top)+.035;
+      sweepFeet.copy(feet);sweepFeet.y=ledge.y;
+      travel.subVectors(ledge,sweepFeet);
+      if(Phys.headroom(ledge,capsuleHeight,capsuleRadius)&&!Phys.castPlayer(feet,capsuleHeight,capsuleRadius,travel.set(0,ledge.y-feet.y,0))&&
+          !Phys.castPlayer(sweepFeet,capsuleHeight,capsuleRadius,travel.subVectors(ledge,sweepFeet))){
+        feet.copy(ledge);feet.y=top;supportY=top;climbing=false;jumpStage='ground';return;
+      }
+    }
+    if(!touchesWall(wallDir,.12)&&!touchesWall(wallDir,.55)){climbing=false;jumpStage='air';verticalSpeed=0;return;}
+    if(dy&&!Phys.castPlayer(feet,capsuleHeight,capsuleRadius,travel.set(0,dy,0))){
+      feet.y+=dy;climbPhase=(climbPhase+dy*.65+1)%1;
+    }
+    supportY=feet.y;
+  }
+
   const footprintGround=(x,z)=>floorAt(x,z,feet.y+.205);
   function animateHuman(dt, speed, crouched) {
-    const actor = actors.human, a = actor.actions;
+    const actor = player, a = actor.actions;
     const moving = sm(.025,.58,speed), running = sm(walkSpeed,runSpeed,speed);
     const jumping = jumpStage !== 'ground';
     let jumpPhase = 0;
@@ -306,6 +355,7 @@ const ActorWalk = (() => {
     if (jumpStage === 'land') jumpPhase = .8 + .2 * clamp(stageTime/recovery);
     const groundedWeight = jumping ? 0 : 1;
     const targets = {
+      climb:climbing?1:0,
       jump: 1-groundedWeight,
       idle: groundedWeight * (crouched ? 0 : 1-moving),
       walk: groundedWeight * (crouched ? 0 : moving*(1-running)),
@@ -316,9 +366,11 @@ const ActorWalk = (() => {
     const blend = actor.fresh ? 1 : 1-Math.exp(-dt*(jumping ? 32 : 18));
     for (const key of Object.keys(targets)) {
       const current = a[key].getEffectiveWeight();
-      a[key].setEffectiveWeight(current+(targets[key]-current)*blend);
+      const weight=climbing&&key!=='climb'?0:targets[key];
+      a[key].setEffectiveWeight(current+(weight-current)*blend);
     }
     if (jumping) a.jump.time = jumpPhase*a.jump.getClip().duration;
+    if (climbing) a.climb.time=climbPhase*a.climb.getClip().duration;
     a.walk.setEffectiveTimeScale(Math.min(1.7,1.5*speed/walkSpeed));
     a.run.setEffectiveTimeScale(Math.min(1.3,speed/runSpeed));
     a.crouchWalk.setEffectiveTimeScale(Math.min(1.3,speed/crouchSpeed));
@@ -329,17 +381,20 @@ const ActorWalk = (() => {
       const k=1-.28*(a.crouch.getEffectiveWeight()+a.crouchWalk.getEffectiveWeight());
       actor.model.scale.y=actor.scaleY*k;actor.model.position.y=actor.baseY*k;
     }
-    if (actor.holder.visible && jumpStage!=='air') Footing.place(actor,footprintGround,a.run.getEffectiveWeight()>.2);
+    if (actor.holder.visible && !climbing && !(actor.kind==='frog' && speed>.025) && jumpStage!=='air') Footing.place(actor,footprintGround,a.run.getEffectiveWeight()>.2);
   }
 
   function walk(dt) {
-    const touchJump = WalkActions.consumeJump();
-    if ((jumpPressed || touchJump) && (jumpStage === 'ground' || jumpStage === 'land')) {
+    regrabDelay=Math.max(0,regrabDelay-dt);
+    const touchJump=WalkActions.consumeJump(),jump=jumpPressed||touchJump,wasClimbing=climbing;
+    if(!climbing&&!regrabDelay&&(jump||jumpStage==='air')&&canGrab()){
+      climbing=true;climbPhase=0;jumpStage='ground';verticalSpeed=0;WalkActions.setCrouch(false);
+    }else if (!climbing&&jump && (jumpStage === 'ground' || jumpStage === 'land')) {
       WalkActions.setCrouch(false);
       jumpStage = 'windup'; stageTime = firstPerson ? windup : 0;
     }
     jumpPressed = false;
-    const height=actors.human.entry?.height || 1.71;
+    const height=player.entry?.height || 1.71;
     capsuleRadius=clamp(height*.153,.22,.31);
     if (crouchActive && !WalkActions.crouch && !Phys.headroom(feet,height,capsuleRadius)) {
       WalkActions.setCrouch(true);
@@ -348,54 +403,31 @@ const ActorWalk = (() => {
     const crouched = crouchActive = WalkActions.crouch && jumpStage === 'ground';
     capsuleHeight=height*(crouched ? .69 : 1);
     const running = !crouched && (WalkActions.run || Modes.keys.has('ShiftLeft') || Modes.keys.has('ShiftRight'));
-    const speed = moveHorizontal(dt, crouched ? crouchSpeed : running ? runSpeed : walkSpeed);
-    stepJump(dt);
+    let speed=0;
+    if(climbing)climbStep(dt,wasClimbing&&jump);
+    else{speed=moveHorizontal(dt, crouched ? crouchSpeed : running ? runSpeed : walkSpeed);stepJump(dt);}
     Phys.setPlayer(feet,capsuleHeight,capsuleRadius);
     animateHuman(dt,speed,crouched);
     const blend = 1-Math.exp(-dt*10);
     lowCamera += (Number(crouched)-lowCamera)*blend;
     fastCamera += (sm(walkSpeed,runSpeed,speed)-fastCamera)*blend;
   }
-  function followFrog(dt) {
-    const a = actors.frog;
-    if (!a) return;
-    const dx = feet.x-frogFeet.x, dz = feet.z-frogFeet.z, distance = Math.hypot(dx,dz);
-    if (hopTime < 0 && distance > 1.65 && a.motion) {
-      const step = Math.min(2.15,distance-.9), forward=Math.atan2(dx,dz);
-      for (const turn of [0,.65,-.65,1.15,-1.15]) {
-        travel.set(Math.sin(forward+turn)*step,0,Math.cos(forward+turn)*step);
-        hopEnd.copy(frogFeet).add(travel); hopEnd.y=surface(hopEnd.x,hopEnd.z);
-        if (hopEnd.y<CFG.sea.level+.08 || Math.abs(hopEnd.y-frogFeet.y)>step*.8) continue;
-        if (Phys.castPlayer(frogFeet,.55,.17,travel,true)) continue;
-        hopStart.copy(frogFeet); a.holder.rotation.y=forward+turn+Math.PI; hopTime=0; break;
-      }
-    }
-    if (hopTime >= 0) {
-      hopTime = Math.min(hopTime + dt, a.motion.duration);
-      const phase = hopTime / a.motion.duration, blend = Math.min(sm(0,.13,phase), 1-sm(.82,1,phase));
-      frogFeet.lerpVectors(hopStart,hopEnd,sm(.22,.76,phase));
-      frogFeet.y = Island.surf(frogFeet.x,frogFeet.z)[0];
-      a.move.time = hopTime; a.move.setEffectiveTimeScale(0).setEffectiveWeight(blend);
-      if (a.rest) a.rest.setEffectiveWeight(1-blend);
-      if (phase >= 1) hopTime = -1;
-    }
-    a.holder.position.copy(frogFeet); a.mixer.update(dt);
-    const airborne = hopTime>=0 ? sm(.2,.48,hopTime/a.motion.duration)*(1-sm(.5,.78,hopTime/a.motion.duration)) : 0;
-    Phys.setCompanion(frogFeet,.17*airborne);
-  }
   function step(camera, dt) {
-    if (actors.human) walk(dt);
-    if (!savedWalk) followFrog(dt);
+    if (player) walk(dt);
     const distance = camera.aspect < 1 ? 4.25 : 3.55;
-    const head = supportY + (feet.y-supportY)*.52 + (actors.human?.entry?.height || 1.71)*(.61-.16*lowCamera);
+    const head = supportY + (feet.y-supportY)*.52 + (player?.entry?.height || 1.71)*(.61-.16*lowCamera);
     if (!cameraReady) { target.set(feet.x,head,feet.z); cameraReady = true; }
-    else target.lerp(eye.set(feet.x,head,feet.z), 1-Math.exp(-dt*12));
+    else target.set(feet.x,lerp(target.y,head,1-Math.exp(-dt*12)),feet.z);
     ray.set(Math.sin(azimuth)*Math.cos(pitch), Math.sin(pitch), Math.cos(azimuth)*Math.cos(pitch));
     const obstruction = Phys.ray(target,ray,distance);
     eye.copy(target).addScaledVector(ray, obstruction ? Math.max(.4,obstruction.t-.18) : distance);
     eye.y = Math.max(eye.y,Island.surf(eye.x,eye.z)[0]+.28);
-    camera.position.copy(eye); camera.lookAt(target); camera.near=.075; camera.fov=52+3*fastCamera;
-    return status || (navigator.maxTouchPoints ? '왼쪽 스틱 이동 · 화면 드래그로 시점 회전' : 'WASD / 방향키 이동 · Shift 달리기 · Space 점프 · C 앉기/일어서기 · 드래그 시점');
+    camera.position.copy(eye); camera.lookAt(target); camera.near=.075; camera.fov=52+(PixelFit.enabled?0:3*fastCamera);
+    if(status)return status;
+    if(climbing)return '벽 오르기 · 앞으로 올라가기 · 뒤로 내려가기 · 점프로 놓기';
+    if(navigator.maxTouchPoints)return '왼쪽 스틱 이동 · 화면 드래그로 시점 회전';
+    const viewHint=VisualStyle.walkYaw()!==null?'드래그 회전 · 휠 확대/축소':'드래그 시점';
+    return 'WASD / 방향키 이동 · Shift 달리기 · Space 점프 · C 앉기/일어서기 · '+viewHint;
   }
   Modes.add('actors',{name:'캐릭터',enter,leave,step},'KeyV','V');
   function beginApproach(x,z,yaw,floorFn,first=false) {
@@ -413,14 +445,15 @@ const ActorWalk = (() => {
     placed=savedWalk.placed; savedWalk=null; firstPerson=false; extraFloor=null;
   }
   function stepFirstPerson(camera,dt) {
-    if (actors.human) walk(dt);
-    const height=actors.human?.entry?.height || 1.71;
+    if (player) walk(dt);
+    const height=player?.entry?.height || 1.71;
     camera.position.copy(feet); camera.position.y+=height*(.91-.26*lowCamera);
     camera.rotation.set(pitch,azimuth,0,'YXZ'); camera.near=.04; camera.fov=68+4*fastCamera;
   }
-  return {enter,leave,step,selectHuman,beginApproach,endApproach,stepApproach:step,stepFirstPerson,
+  return {enter,leave,step,selectHuman,beginApproach,endApproach,stepApproach:step,stepFirstPerson,clearInput,
     beginFirstPerson(x,z,yaw) { beginApproach(x,z,yaw,null,true); }, get position() {return feet;},
+    get avatar(){return player?.holder || null;}, get thirdPerson(){return active&&!firstPerson;},get climbing(){return climbing;},
     get currentId() {
-    return actors.human ? actors.human.entry?.id || 'kate' : null;
+    return player ? player.entry?.id || 'kate' : null;
   } };
 })();

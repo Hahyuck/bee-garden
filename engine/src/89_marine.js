@@ -10,7 +10,9 @@ const Marine=(()=>{
   const rod=new THREE.CylinderGeometry(1,1,1,10), taper=new THREE.ConeGeometry(1,1,10);
   const pale=0xf4e5c4, navy=0x195359, amber=0xeb943e, glass=0x386573;
   let active='',built=false,heading=0,speed=0,depth=0,clock=0,leg=0,laps=0,scope=false,scopeYaw=0,zoom=1;
-  let prop, mast, wake, lamps, mouse=null, bottom=null, bottomX=Infinity, bottomZ=Infinity,orbit=0,tilt=0;
+  let prop,boatProp,mast,scopeLens,wake,schools,lamps,mouse=null,bottom=null,bottomX=Infinity,bottomZ=Infinity,orbit=0,tilt=0;
+  let scopeBlend=0;
+  const lensAt=new THREE.Vector3(),lensAim=new THREE.Vector3(),scopeDepth=2.05;
   function mat(color){
     if(!materials.has(color))materials.set(color,new THREE.MeshStandardMaterial({color,roughness:.54,metalness:.12}));
     return materials.get(color);
@@ -57,11 +59,16 @@ const Marine=(()=>{
       }
       const ring=part(boat,new THREE.TorusGeometry(.27,.069,8,22),amber,s*1.04,1.13,-.77,1,1,1);ring.rotation.y=Math.PI/2;
     }
-    wake=new THREE.Group();boat.add(wake);
-    for(const s of [-1,1]){
-      const trail=part(wake,orb,0xc8eeeb,1.24*s,.10,-4.75,.18,.052,2.35);
-      trail.rotation.y=-s*.17;
+    part(boat,cube,navy,0,.02,-3.75,.34,.9,.40);
+    const shaft=part(boat,rod,0xa8a8a0,0,-.26,-3.92,.075,.6,.075);shaft.rotation.x=Math.PI/2;
+    boatProp=new THREE.Group();boatProp.name='boat-propeller';boatProp.position.set(0,-.26,-4.12);boat.add(boatProp);
+    part(boatProp,orb,0xae8955,0,0,0,.13,.13,.22);
+    for(let i=0;i<3;i++){
+      const arm=new THREE.Group();arm.rotation.z=i*TAU/3;boatProp.add(arm);
+      const blade=part(arm,orb,0xb99352,.065,.24,0,.13,.25,.046);
+      blade.rotation.set(.48,0,-.35);
     }
+    wake=makeBoatWake(world);
     boat.name='coastal-cabin-boat';
   }
   function makeSub(){
@@ -77,6 +84,7 @@ const Marine=(()=>{
     part(sub,cube,navy,0,.04,-1.66,3.12,.10,.63);part(sub,cube,navy,0,.13,-2.05,.12,1.71,.58);
     mast=new THREE.Group();sub.add(mast);part(mast,rod,pale,0,1.73,-.28,.074,1.24,.074);
     part(mast,cube,navy,0,2.38,-.18,.21,.19,.34);
+    scopeLens=new THREE.Object3D();scopeLens.position.set(0,2.38,.025);mast.add(scopeLens);
     prop=new THREE.Group();prop.position.z=-3;sub.add(prop);
     for(let i=0;i<4;i++){const blade=new THREE.Group();blade.rotation.z=i*Math.PI/2;prop.add(blade);part(blade,orb,0xa57d4c,0,.35,0,.125,.37,.075);}
     lamps=new THREE.PointLight(0xa4f4f3,42,21,1.6);lamps.position.set(0,.05,3.7);sub.add(lamps);
@@ -174,7 +182,7 @@ const Marine=(()=>{
       list.forEach(([matrix,color],i)=>{batch.setMatrixAt(i,matrix);batch.setColorAt(i,new THREE.Color(color));});
       batch.name=list===rocks?'reef-rocks':'branching-coral';reef.add(batch);
     }
-    for(let i=0;i<24;i++)makeAnimal('fish',harbor.x+(i%6-2.5)*1.5,-4.9+(i%3)*.55,harbor.z+13+Math.floor(i/6)*2,i*.62);
+    schools=makeFishSchools(reef,seaFloor,harbor);
     for(const [kind,x,d,z] of [['turtle',-3,4.3,12],['squid',3,6.2,18],['squid',8,5.4,24],['octopus',-1,0,23],['octopus',9,0,32]]){
       makeAnimal(kind,harbor.x+x,d?sea-d:seaFloor(harbor.x+x,harbor.z+z)+.20,harbor.z+z,random()*TAU);
     }
@@ -224,7 +232,7 @@ const Marine=(()=>{
   addEventListener('blur',()=>{touching.clear();releasePointer();});
   function enter(mode){
     build();active=mode;world.visible=true;boat.visible=mode==='boat';sub.visible=mode==='sub';reef.visible=sub.visible;
-    p.set(harbor.x,sea,harbor.z);depth=sub.visible?5.3:0;heading=speed=leg=laps=orbit=tilt=0;scope=false;scopeYaw=0;zoom=1;ui.hidden=false;
+    p.set(harbor.x,sea,harbor.z);depth=sub.visible?5.3:0;heading=speed=leg=laps=orbit=tilt=scopeBlend=0;scope=false;scopeYaw=0;zoom=1;ui.hidden=false;wake.reset();
     const touch=navigator.maxTouchPoints||matchMedia('(any-pointer:coarse)').matches;
     for(const b of helm.children)b.hidden=['scope','zoom'].includes(b.dataset.helm)?mode!=='sub':!touch || (mode==='boat'&&['rise','dive'].includes(b.dataset.helm));
   }
@@ -252,28 +260,35 @@ const Marine=(()=>{
     // Sample the bow as well as the centre so shallows stop a hull before the camera reaches land.
     const bed=seaFloor(nextX+Math.sign(speed)*dx*3.5,nextZ+Math.sign(speed)*dz*3.5);
     if(bed<sea-(diving?depth+1.2:1.0)){p.x=nextX;p.z=nextZ;}else speed*=Math.exp(-dt*10);
-    depth=diving?clamp(depth-(lift || (scope&&depth>2.02?1:0))*2.7*dt,1.40,Math.max(1.40,sea-seaFloor(p.x,p.z)-1.25)):0;
+    const maxDepth=Math.max(1.40,sea-seaFloor(p.x,p.z)-1.25);
+    depth=diving?clamp(scope?depth+clamp(Math.min(scopeDepth,maxDepth)-depth,-2.7*dt,2.7*dt):depth-lift*2.7*dt,1.40,maxDepth):0;
     const bob=Sea.height(p.x,p.z,clock)-sea;
     p.y=diving?sea-depth:sea+bob;const ship=diving?sub:boat;ship.position.copy(p);
     ship.rotation.set(diving?.035*Math.sin(clock):-.026*Math.cos(clock*1.2),heading,(diving?.025:.064)*Math.sin(clock*1.15)-turn*sm(0,9,Math.abs(speed))*.07,'YXZ');
-    const liveScope=diving&&scope&&depth<=2.06;
+    const ready=diving&&scope&&Math.abs(depth-Math.min(maxDepth,scopeDepth))<.035;
+    scopeBlend=clamp(scopeBlend+(ready?1:-1)*dt*1.35,0,1);
+    const blend=sm(0,1,scopeBlend),liveScope=scopeBlend>=1;
     overlay.hidden=!liveScope;
     if(diving){
-      updateBottom();animateReef(dt);prop.rotation.z+=dt*(2+Math.abs(speed)*5);mast.position.y=scope?1.25:0;
-      sub.visible=!liveScope;ui.querySelector('[data-helm=zoom]').hidden=!liveScope;
+      updateBottom();animateReef(dt);schools.step(p,clock);prop.rotation.z+=dt*(2+Math.abs(speed)*5);
+      mast.position.y+=clamp((ready?1.25:0)-mast.position.y,-1.8*dt,1.8*dt);
+      mast.rotation.y=scopeYaw;
+      sub.visible=true;ui.querySelector('[data-helm=zoom]').hidden=!liveScope;
     }else{
-      wake.visible=Math.abs(speed)>1;wake.scale.z=.65+Math.abs(speed)/12;
+      boatProp.rotation.z=(boatProp.rotation.z+speed*4.5*dt)%TAU;wake.step(p,heading,speed,dt);
       const buoy=markers[leg];if(Math.hypot(p.x-buoy.position.x,p.z-buoy.position.z)<6){leg=(leg+1)%course.length;if(!leg)laps++;}
     }
     for(const m of markers){m.position.y=Sea.height(m.position.x,m.position.z,clock);m.rotation.z=.08*Math.sin(clock+m.position.x);}
-    if(liveScope){
-      const a=heading+scopeYaw;camera.position.set(p.x,sea+Math.max(.66,bob+.76),p.z);
-      look.set(p.x+50*Math.sin(a),camera.position.y+.13,p.z+50*Math.cos(a));camera.fov=43/zoom;
-    }else{
+    {
       const vx=Math.sin(heading+orbit),vz=Math.cos(heading+orbit);
       eye.set(p.x-vx*(diving?9.3:10.5),p.y+(diving?2.5:3.95)+tilt,p.z-vz*(diving?9.3:10.5));
       if(diving)eye.y=clamp(eye.y,seaFloor(eye.x,eye.z)+.45,sea-.48);
       camera.position.copy(eye);look.set(p.x+vx*4,p.y+(diving?.60:.85),p.z+vz*4);camera.fov=diving?65:56;
+      if(diving&&blend>0){
+        scopeLens.getWorldPosition(lensAt);const a=heading+scopeYaw;
+        lensAim.copy(lensAt);lensAim.x+=50*Math.sin(a);lensAim.z+=50*Math.cos(a);
+        camera.position.lerp(lensAt,blend);look.lerp(lensAim,blend);camera.fov=liveScope?43/zoom:lerp(65,43/zoom,blend);
+      }
     }
     camera.lookAt(look);camera.near=.11;
     const compass=a=>String((Math.round(-a*180/Math.PI)%360+360)%360).padStart(3,'0');
@@ -285,5 +300,5 @@ const Marine=(()=>{
   }
   Modes.add('boat',{name:'해안 항해',enter:()=>enter('boat'),leave,step},'Digit6','6');
   Modes.add('sub',{name:'잠수함',enter:()=>enter('sub'),leave,step},'Digit7','7');
-  return {rescue(x,z,yaw){Modes.set('boat');p.set(x,sea,z);heading=yaw;},get state(){return {mode:active,depth,heading,speed,position:p.toArray(),scope,leg,laps};}};
+  return {rescue(x,z,yaw){Modes.set('boat');p.set(x,sea,z);heading=yaw;},get waypoint(){return markers[leg]?.position;},get position(){return p;},get state(){return {mode:active,depth,heading,speed,position:p.toArray(),scope,leg,laps};}};
 })();

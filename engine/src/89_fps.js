@@ -13,9 +13,11 @@ const PulseRange = (() => {
   let active = false, held = false, triggerPointer = null, pressed = false, built = false;
   let ammo = capacity, hits = 0, wave = 1, cooldown = 0, reload = 0, hitTime = 0, waveTime = 0;
   let clock = 0, recoil = 0, flash = null, muzzle = null;
+  let paused=false, hadLock=false, lockRequest=null;
 
   const ui = document.createElement('div'); ui.id = 'pulse-range-ui'; ui.hidden = true;
   ui.innerHTML = `<div id="pulse-reticle" aria-hidden="true"><i></i></div>
+    <div id="pulse-gate" hidden><strong aria-live="polite"></strong><button type="button">클릭하여 조준</button></div>
     <div id="pulse-counter" aria-label="사격 기록"><b></b><span></span></div>
     <div id="pulse-touch"><button type="button" id="pulse-fire">발사</button><button type="button" id="pulse-reload">재장전</button></div>`;
   const style = document.createElement('style');
@@ -26,6 +28,9 @@ const PulseRange = (() => {
     #pulse-reticle::before{width:23px;height:2px;mask:linear-gradient(to right,#000 27%,transparent 27% 73%,#000 73%)}
     #pulse-reticle::after{width:2px;height:23px;mask:linear-gradient(to bottom,#000 27%,transparent 27% 73%,#000 73%)}
     #pulse-reticle i{width:3px;height:3px;border-radius:50%}#pulse-reticle.ready{--reticle:#a5fff0}#pulse-reticle.hit{--reticle:#ffbb62;transform:translate(-50%,-50%) rotate(45deg)}
+    #pulse-gate{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;text-align:center;color:white;background:#182823ec;padding:14px 18px;border-radius:8px;pointer-events:auto}
+    #pulse-gate strong:not(:empty){display:block;margin-bottom:8px}#pulse-gate button{font:inherit;border:1px solid #a1ede1;border-radius:5px;padding:8px 16px;color:#172c26;background:#b4e9d8;cursor:pointer}
+    #pulse-range-ui[data-paused="yes"] #pulse-touch,body.fps-paused #walk-action-buttons{display:none}
     #pulse-counter{position:fixed;right:max(15px,env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));z-index:5;text-align:right;color:#f8f7f0;background:#18221de8;border-left:3px solid #a1ede1;padding:5px 10px;border-radius:3px}
     #pulse-counter b{font:700 16px/1.2 ui-monospace,monospace}#pulse-counter span{display:block;font-size:10px;color:#cae3d9}
     #pulse-touch{display:none;position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(178px + env(safe-area-inset-bottom));align-items:center;gap:7px;z-index:6}
@@ -38,6 +43,7 @@ const PulseRange = (() => {
   document.head.append(style); document.body.append(ui);
   const reticle = ui.querySelector('#pulse-reticle'), count = ui.querySelector('#pulse-counter b');
   const score = ui.querySelector('#pulse-counter span'), fireButton = ui.querySelector('#pulse-fire');
+  const gate=ui.querySelector('#pulse-gate'),resume=gate.querySelector('button'),notice=gate.querySelector('strong');
   const metal = (color,metalness=.32) => new THREE.MeshStandardMaterial({color,metalness,roughness:.46});
   const glow = (color,intensity=1) => new THREE.MeshBasicMaterial({color:new THREE.Color(color).multiplyScalar(intensity),toneMapped:false});
   function mesh(geo,material,parent,x=0,y=0,z=0) {
@@ -128,7 +134,7 @@ const PulseRange = (() => {
     osc.connect(gain); gain.connect(G.snd.out); osc.start(t); osc.stop(t+.12);
     osc.onended=()=>{osc.disconnect();gain.disconnect();};
   }
-  function reloadCell() { if(active && !reload && ammo<capacity){reload=reloadTime;tone('load');} }
+  function reloadCell() { if(active && !paused && !reload && ammo<capacity){reload=reloadTime;tone('load');} }
   function findTarget(camera) {
     let closest=reach,index=-1;
     for(let i=0;i<targets.length;i++) {
@@ -165,23 +171,52 @@ const PulseRange = (() => {
 
   function resetTrigger() { held=pressed=false;triggerPointer=null; }
   function triggerDown(e) {
-    if(!active || triggerPointer!==null || e.button!==0)return;
+    if(!active || paused || triggerPointer!==null || e.button!==0)return;
     triggerPointer=e.pointerId;held=pressed=true;
   }
   const canvas=document.getElementById('c');
-  canvas.addEventListener('pointerdown',e=>{
-    if(!active || e.pointerType==='touch')return;
-    if(e.button===2){e.preventDefault();reloadCell();return;}
-    triggerDown(e);
+  const locked=()=>document.pointerLockElement===canvas;
+  function syncGate(message=''){
+    gate.hidden=!active||(!paused&&(locked()||ui.dataset.touch==='yes')&&!message);
+    reticle.hidden=!gate.hidden;ui.dataset.paused=paused?'yes':'no';
+    document.body.classList.toggle('fps-paused',active&&paused);
+    notice.textContent=message||(paused?'일시정지':'');
+    resume.textContent=paused?'계속하기':'클릭하여 조준';
+  }
+  function pause(){
+    if(!active)return;
+    paused=true;lockRequest=null;resetTrigger();Modes.keys.clear();ActorWalk.clearInput();
+    WalkActions.release();WalkStick.setActive(false);Sound.setPaused(true);syncGate();
+    if(locked())document.exitPointerLock();
+  }
+  function play(){
+    paused=false;Modes.keys.clear();WalkStick.setActive(true);Sound.setPaused(false);
+    resume.blur();syncGate();
+  }
+  function capture(){
+    if(!active||locked()||lockRequest)return;
+    const request={};lockRequest=request;
+    const failed=()=>{if(lockRequest===request){lockRequest=null;pause();syncGate('마우스를 고정할 수 없습니다. 게임 화면에서 다시 시도하세요.');}};
+    try{if(!canvas.requestPointerLock){failed();return;}canvas.requestPointerLock()?.catch(failed);}
+    catch{failed();}
+  }
+  resume.addEventListener('click',e=>{
+    if(e.pointerType==='touch'||(ui.dataset.touch==='yes'&&!matchMedia('(any-pointer: fine)').matches&&e.detail===0))play();
+    else capture();
   });
-  // A second mouse button pressed while firing only emits mousedown, not pointerdown.
-  canvas.addEventListener('mousedown',e=>{if(active && e.button===2){e.preventDefault();reloadCell();}});
+  canvas.addEventListener('click',e=>{if(active&&!locked()&&e.button===0&&e.pointerType!=='touch'&&!(e.sourceCapabilities?.firesTouchEvents))capture();});
+  canvas.addEventListener('mousedown',e=>{
+    if(!active||paused||!locked())return;
+    if(e.button===2){e.preventDefault();reloadCell();}
+    else if(e.button===0){held=pressed=true;}
+  });
+  addEventListener('mouseup',e=>{if(e.button===0&&triggerPointer===null)held=false;});
   canvas.addEventListener('contextmenu',e=>{if(active)e.preventDefault();});
   fireButton.addEventListener('pointerdown',e=>{
     e.preventDefault();e.stopPropagation();triggerDown(e);
     if(triggerPointer===e.pointerId)fireButton.setPointerCapture(e.pointerId);
   });
-  fireButton.addEventListener('click',e=>{if(active&&e.detail===0)pressed=true;});
+  fireButton.addEventListener('click',e=>{if(active&&!paused&&e.detail===0)pressed=true;});
   ui.querySelector('#pulse-reload').addEventListener('click',reloadCell);
   for(const ev of ['pointerup','pointercancel','lostpointercapture'])addEventListener(ev,e=>{
     if(e.pointerId===triggerPointer){held=false;triggerPointer=null;if(ev==='pointercancel')pressed=false;}
@@ -190,12 +225,27 @@ const PulseRange = (() => {
     if(!active||e.code!=='KeyR'||e.repeat||e.metaKey||e.ctrlKey||e.altKey||e.target.closest?.('input,select,textarea,[contenteditable="true"]'))return;
     reloadCell();
   });
-  addEventListener('blur',resetTrigger);document.addEventListener('visibilitychange',()=>{if(document.hidden)resetTrigger();});
-  document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)resetTrigger();});
+  addEventListener('keydown',e=>{
+    if(!active||e.target.closest?.('dialog[open]'))return;
+    if(e.key==='Escape'||e.code==='Escape'){e.preventDefault();e.stopImmediatePropagation();pause();return;}
+    if(paused&&!e.target.closest?.('input,select,textarea,button,[contenteditable="true"]')&&
+      /^(Key[WASDCRFGX]|Arrow\w+|Shift(Left|Right)|Space)$/.test(e.code))e.stopImmediatePropagation();
+  },true);
+  addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
+  document.addEventListener('pointerlockerror',()=>{
+    if(active&&lockRequest){pause();syncGate('마우스 고정을 허용한 뒤 다시 눌러 주세요.');}
+  });
+  document.addEventListener('pointerlockchange',()=>{
+    if(locked()){
+      if(!active||!lockRequest){document.exitPointerLock();return;}
+      lockRequest=null;hadLock=true;play();
+    }else if(hadLock){hadLock=false;pause();}
+  });
   function enter() {
     build();placeStandColliders();active=group.visible=true;ui.hidden=false;
     ui.dataset.touch=(matchMedia('(any-pointer: coarse)').matches||navigator.maxTouchPoints)?'yes':'no';
     ActorWalk.beginFirstPerson(spawn.x,spawn.z,spawn.yaw);
+    paused=hadLock=false;lockRequest=null;syncGate();
     held=pressed=false;triggerPointer=null;wave=1;hits=0;ammo=capacity;
     clock=cooldown=reload=hitTime=recoil=waveTime=0;
     for(const t of targets){t.live=t.face.visible=true;}
@@ -204,6 +254,7 @@ const PulseRange = (() => {
   }
   function leave() {
     active=group.visible=false;ui.hidden=true;resetTrigger();
+    paused=hadLock=false;lockRequest=null;Sound.setPaused(false);syncGate();
     for(const remove of standColliders)remove();
     standColliders.length=0;
     ActorWalk.endApproach();
@@ -236,8 +287,8 @@ const PulseRange = (() => {
     reticle.classList.toggle('ready',aim.index>=0);reticle.classList.toggle('hit',hitTime>0);
     const text=reload?'재장전 중':ammo+' / '+capacity, report='명중 '+hits+' · 라운드 '+wave;
     if(count.textContent!==text)count.textContent=text;if(score.textContent!==report)score.textContent=report;
-    return ui.dataset.touch==='yes'?'스틱 이동 · 드래그 조준 · 발사':'WASD 이동 · 마우스 조준 · 좌클릭 발사 · 우클릭 재장전 · Space 점프 · Shift 달리기 · C 앉기';
+    return ui.dataset.touch==='yes'?'스틱 이동 · 드래그 조준 · 발사':'WASD 이동 · 좌클릭 발사 · 우클릭 재장전 · Space 점프 · Shift 달리기 · C 앉기 · Esc 일시정지';
   }
   Modes.add('fps',{name:'1인칭 사격',enter,leave,step},'Digit3','3');
-  return {get ammo(){return ammo;},get hits(){return hits;},get wave(){return wave;},get reloading(){return reload>0;}};
+  return {get paused(){return paused;},get ammo(){return ammo;},get hits(){return hits;},get wave(){return wave;},get reloading(){return reload>0;}};
 })();

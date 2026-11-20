@@ -33,14 +33,14 @@ const Modes = (() => {
   const picker = document.createElement('select');
   picker.id='mode-picker'; picker.setAttribute('aria-label','플레이 모드');
   picker.style.cssText='position:fixed;right:max(14px,env(safe-area-inset-right));top:100px;z-index:6;max-width:148px;height:35px;background:#211e1aee;color:#f3e6d2;border:1px solid #eddbbf55;border-radius:8px;padding:3px 8px;font:600 13px system-ui;cursor:pointer;color-scheme:dark';
-  for (const [id,label] of [['free','1 자유 비행'],['bee','2 벌'],['fps','3 FPS'],['drive','4 레이싱'],['flight','5 경비행'],['boat','6 배'],['sub','7 잠수함'],['actors','V 캐릭터'],['collect','0 통 모으기'],['sample','모델 보기']]) {
+  for (const [id,label] of [['free','1 자유 비행'],['bee','2 벌'],['fps','3 FPS'],['drive','4 레이싱'],['flight','5 경비행'],['boat','6 배'],['sub','7 잠수함'],['fishing','8 낚시'],['actors','V 캐릭터'],['collect','0 통 모으기'],['sample','모델 보기']]) {
     const opt = new Option(label,id); if (id==='sample') opt.disabled=true; picker.add(opt);
   }
   picker.addEventListener('focus',()=>keys.clear());
   picker.addEventListener('keydown',e=>e.stopPropagation());
   picker.addEventListener('change',()=>{set(picker.value);picker.blur();}); document.body.append(picker);
   const hud = document.createElement('div'); hud.style.cssText = 'position:fixed;left:14px;bottom:14px;font:600 12px/1.5 "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;color:#f3e6d2;background:rgba(14,12,10,.55);padding:8px 12px;border-radius:10px;border:1px solid rgba(243,217,189,.18);z-index:4;pointer-events:none;white-space:pre'; document.body.appendChild(hud);
-  function set(name) { if (name==='hike') name='fps'; if (!MODES[name] || name === cur) return; keys.clear(); MODES[cur].leave(); if (cur !== 'free' && cur !== 'drive') fly.p.copy(G.camera.position); cur = name; picker.value=cur; MODES[cur].enter(); hudAt = 0; }
+  function set(name,restart=false) { if (name==='hike') name='fps'; if (!MODES[name] || (name === cur&&!restart)) return; keys.clear(); MODES[cur].leave(); if (cur !== 'free' && cur !== 'drive') fly.p.copy(G.camera.position); cur = name; picker.value=cur; MODES[cur].enter(); hudAt = 0; }
   // the shadow map: a box around the lens, snapped to its own texels so it does not swim; small for the bee, wide from the air
   const SHP = [[310, 520, 20, 1100, -.00035, .22], [75, 260, 1, 520, -.00008, .07], [7, 40, 1, 80, -.00004, .0025], [24, 100, 1, 205, -.000035, .009]], SR = new THREE.Vector3(), SU = new THREE.Vector3(); let shMode = -1;
   function shadows(camera, k) { const sun = G.sun, sc = sun.shadow.camera, p = SHP[k], S = Sky.light; q.setFromRotationMatrix(m.lookAt(S, P.set(0, 0, 0), UP)); SR.set(1, 0, 0).applyQuaternion(q); SU.set(0, 1, 0).applyQuaternion(q);
@@ -56,11 +56,30 @@ const Modes = (() => {
     const high = camera.position.y - Math.max(Island.surf(camera.position.x, camera.position.z)[0], 0); shadows(camera, cur === 'bee' && !fix ? 2 : high>45 ? 0 : high<8 && ['actors','fps','drive','flight','sample'].includes(cur) ? 3 : 1);
     if (performance.now() - hudAt > 250) {
       hudAt = performance.now();
-      const modes = innerWidth < 820 ? MODES[cur].name : '1 자유   2 벌   3 FPS   4 레이싱   5 경비행   6 배   7 잠수함   V 캐릭터   H 활용법';
-      hud.textContent = modes + '\n' + line;
+      hud.id='mode-hint';hud.textContent=line;
     } }
-  addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); if (e.code === 'KeyB' && !e.repeat && cur === 'bee') eyeOn = !eyeOn; const id=shortcuts[e.code] || extra[e.code]; if (id && !e.repeat) set(id); if (cur==='actors' && e.code.startsWith('Arrow')) e.preventDefault(); });
-  addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
+  function physicalKey(e){
+    if(e.code&&e.code!=='Unidentified')return e.code;
+    if(/^[wasd]$/i.test(e.key))return 'Key'+e.key.toUpperCase();
+    return e.key==='Shift'?(e.location===2?'ShiftRight':'ShiftLeft'):e.key;
+  }
+  const control='input,textarea,select,button,a,[contenteditable="true"]';
+  addEventListener('keydown', e => {
+    if(e.repeat||e.metaKey||e.ctrlKey||e.altKey||e.target.closest?.(control))return;
+    const code=physicalKey(e);keys.add(code);
+    if(code==='KeyB'&&cur==='bee')eyeOn=!eyeOn;
+    const id=shortcuts[code]||extra[code];if(id)set(id);
+    if(cur==='actors'&&code.startsWith('Arrow'))e.preventDefault();
+  });
+  // Release even if a focused control consumes keyup or a layout omits KeyboardEvent.code.
+  addEventListener('keyup',e=>{
+    keys.delete(physicalKey(e));
+    if(e.key==='Shift'&&!e.shiftKey){keys.delete('ShiftLeft');keys.delete('ShiftRight');}
+  },true);
+  const release=()=>keys.clear();
+  document.addEventListener('focusin',e=>{if(e.target.closest?.(control))release();});
+  document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)release();});
+  addEventListener('blur',release);addEventListener('pagehide',release);
   document.addEventListener('visibilitychange', () => { if (document.hidden) keys.clear(); });
   return { step, set, add, visitOutcrop, MODES, fly, keys, get cur() { return cur; } };
 })();

@@ -200,6 +200,6 @@ const Drive = (() => {
   addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
   return { build, step, enter, leave, finish, park, reset, car, inp, keys, touch,
     setDoor(open) { doorHinge.rotation.y=-1.39*clamp(open); },
-    get on() { return on; }, get body() { return body; }, get paused() { return paused; },
+    get on() { return on; }, get body() { return body; }, get paused() { return paused; },get cockpit(){return camMode===2;},
     recover:back };
 })();

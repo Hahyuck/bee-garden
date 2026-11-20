@@ -83,7 +83,7 @@ void main(){ vec2 uv = vUv;
     M.fin = mat(FINAL, { tC: { value: null }, tB1: { value: null }, tB2: { value: null }, uExp: { value: 1 }, uTime: G.uTime, uAspect: { value: 1 }, uVig: { value: C.vignette }, uGrain: { value: C.grain }, uBloom: { value: C.bloom }, uFringe: { value: C.fringe }, uFilm: { value: 1 }, uEye: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, tD: { value: null }, uShafts: { value: 0 }, uSunScr: { value: new THREE.Vector2() }, uShaftCol: { value: new THREE.Vector3() }, uHeat: { value: [new THREE.Vector3(), new THREE.Vector3()] } }); }
   // heat(world position, strength): the air shimmers there for a second or two
   function heat(p, k) { const h = heatP[0].k <= heatP[1].k ? heatP[0] : heatP[1]; h.p.copy(p); h.k = k; }
-  function size() { const s = R.getDrawingBufferSize(new THREE.Vector2()), w = Math.max(8, s.x), h = Math.max(8, s.y); if (rtMain && w === W && h === H) return; W = w; H = h; for (const t of [rtMain, rtDof, rtLens, b1a, b1b, b2a, b2b]) if (t) t.dispose();
+  function size() { const s = R.getDrawingBufferSize(new THREE.Vector2()), w = PixelFit.enabled?2*PixelFit.width:Math.max(8,s.x), h = PixelFit.enabled?2*PixelFit.height:Math.max(8,s.y); if (rtMain && w === W && h === H) return; W = w; H = h; for (const t of [rtMain, rtDof, rtLens, b1a, b1b, b2a, b2b]) if (t) t.dispose();
     rtLens = null;
     const hf = { type: THREE.HalfFloatType, depthBuffer: false };
     rtMain = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, samples: LOW ? 0 : 4, depthTexture: new THREE.DepthTexture(W, H) }); rtDof = new THREE.WebGLRenderTarget(W, H, hf);
@@ -112,6 +112,7 @@ void main(){ vec2 uv = vUv;
     const bl = (from, to, x, y) => { M.blur.uniforms.tC.value = from.texture; M.blur.uniforms.uDir.value.set(x, y); pass(M.blur, to); };
     bl(b1a, b1b, 1 / b1a.width, 0); bl(b1b, b1a, 0, 1 / b1a.height); bl(b1a, b2b, 1 / b2a.width, 0); bl(b2b, b2a, 0, 1 / b2a.height);
     const f = M.fin.uniforms; f.tC.value = src.texture; f.tB1.value = b1a.texture; f.tB2.value = b2a.texture; f.uExp.value = exp; f.uAspect.value = W / H; f.tD.value = rtMain.depthTexture; f.uEye.value = lens.eye; f.uRes.value.set(W, H); f.uBloom.value = G.look.bloom ? C.bloom : 0; f.uFilm.value = G.look.film ? 1 : 0;
+    f.uGrain.value=PixelFit.enabled?0:C.grain;
     f.uWaterClip ??= {value:new THREE.Vector3()};
     f.uWaterClip.value.set(Modes.cur==='sub'?Math.max(0,CFG.sea.level-camera.position.y):0,camera.near,camera.far);
     // where the sun is on the screen, and whether its shafts can be seen: low sun, in front of the lens, not behind a storm

@@ -107,6 +107,7 @@ const WalkActions = (() => {
     get run() { return running; },
     get crouch() { return crouching; },
     setCrouch, toggleCrouch() { setCrouch(!crouching); }, reset,
+    release() { running=false; jumpPending=false; paint(); },
     consumeJump() { const jump = jumpPending; jumpPending = false; return jump; }
   };
 })();

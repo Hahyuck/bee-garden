@@ -8,10 +8,13 @@ const SampleBrowser = (() => {
     licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/', origin: 'VRChat · 100Avatars',
     file: window.GARDEN_ACTORS.human
   };
-  const entries = [kate, ...(window.GARDEN_SAMPLES || [])];
-  WalkActions.configurePeople(entries.filter(item => item.category === 'person'), chooseHuman);
+  const frog={...kate,id:'froggy',label:'개구리 · Froggy',category:'animal',species:'frog',height:.68,
+    source:'https://github.com/PolygonalMind/100Avatars/tree/ff07c2ad0017819c4e5366656ee1e5bcc4029bd4/100Avatars_010',file:window.GARDEN_ACTORS.frog};
+  const entries = [kate, ...(window.GARDEN_SAMPLES || []), frog];
+  const playable=item=>item.category==='person'||item.category==='animal';
+  WalkActions.configurePeople(entries.filter(playable), chooseHuman);
   function chooseHuman(item) { return ActorWalk.selectHuman(item === kate ? null : item); }
-  const categories = {person:'사람', prop:'소품', building:'건물', car:'자동차', aircraft:'비행기'};
+  const categories = {person:'사람',animal:'동물', prop:'소품', building:'건물', car:'자동차', aircraft:'비행기'};
   const byId = id => document.getElementById(id);
   const button = byId('sample-button'), panel = byId('sample-picker');
   const category = byId('sample-category'), model = byId('sample-model');
@@ -169,7 +172,7 @@ const SampleBrowser = (() => {
     const download = document.createElement('a');
     download.textContent = 'GLB 받기'; download.href = item.file; download.download = item.id + '.glb';
     credit.append(download);
-    run.textContent = item.category === 'person' ? '이 캐릭터 조종' : '월드에서 보기';
+    run.textContent = playable(item) ? '이 캐릭터 조종' : '월드에서 보기';
   }
   function refreshModels() {
     model.replaceChildren();
@@ -197,12 +200,13 @@ const SampleBrowser = (() => {
   });
   run.addEventListener('click', () => {
     const item = selection(); toggle(false); button.blur();
-    if (item.category === 'person') {
+    if (playable(item)) {
       Modes.set('actors'); chooseHuman(item);
     } else {
       entry = item;
       if (Modes.cur === 'sample') loadWorld(entry); else Modes.set('sample');
     }
   });
-  return {get entry() { return entry; },get walking() { return walking; }};
+  return {get entry() { return entry; },get walking() { return walking; },
+    character(id){return entries.find(item=>item.id===id&&playable(item));}};
 })();

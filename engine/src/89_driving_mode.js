@@ -6,7 +6,7 @@ const DriveRace = (() => {
   const entryEye = new THREE.Vector3(), entryLook = new THREE.Vector3(), entryFocus = new THREE.Vector3();
   const mirrorCam = new THREE.PerspectiveCamera(56, 3.25, .2, 4200);
   const view = new THREE.Vector4(), scissor = new THREE.Vector4();
-  let mirrorTarget, mirrorScene, mirrorQuad, mirrorClock = 1;
+  let mirrorTarget, mirrorColor, mirrorScene, mirrorQuad, mirrorTone, mirrorFilter, mirrorClock = 1;
   let phase = 'none', t = 0, elapsed = 0, best = 0, nextGate = 0, previousIndex = 0;
   let handoffYaw = 0, arch = null, promptDistance = Infinity, messageAt = -1;
   let releaseParked = null, releaseGate = [];
@@ -145,9 +145,9 @@ const DriveRace = (() => {
   }
   function boardCar() {
     if (phase === 'finished') { Drive.leave(); startApproach(); return; }
-    if (phase !== 'approach' || promptDistance > 1.5 || !G.scene.getObjectByName('human')) return;
+    if (phase !== 'approach' || promptDistance > 1.5 || !ActorWalk.avatar) return;
     from.copy(ActorWalk.position);
-    const actor=G.scene.getObjectByName('human'); handoffYaw=actor.rotation.y;
+    const actor=ActorWalk.avatar; handoffYaw=actor.rotation.y;
     entryEye.copy(G.camera.position);G.camera.getWorldDirection(entryLook).multiplyScalar(entryEye.distanceTo(from)).add(entryEye);
     boardingStart=doorAngle;releaseDoor?.();releaseDoor=null;
     phase='boarding';t=0;WalkActions.setCrouch(true);Modes.keys.clear();
@@ -165,7 +165,7 @@ const DriveRace = (() => {
   function boardStep(camera,dt) {
     t+=dt;
     const p=clamp(t/1.05);
-    const actor = G.scene.getObjectByName('human');
+    const actor = ActorWalk.avatar;
     ActorWalk.stepApproach(camera,dt);
     vehiclePoint(seat,.38,-.53,0);
     if(actor) {
@@ -224,7 +224,7 @@ const DriveRace = (() => {
       doorButton.hidden=promptDistance>1.5;
       doorButton.textContent=doorOpen?'문 닫기 (O)':'문 열기 (O)';
       doorButton.setAttribute('aria-pressed',String(doorOpen));
-      board.disabled=promptDistance>1.5 || !G.scene.getObjectByName('human');
+      board.disabled=promptDistance>1.5 || !ActorWalk.avatar;
       board.textContent=board.disabled ? '운전석까지 '+promptDistance.toFixed(1)+' m' : (navigator.maxTouchPoints?'탑승':'E  탑승');
       return '운전석 옆에서 탑승';
     }
@@ -239,20 +239,22 @@ const DriveRace = (() => {
   }
   function leave() {
     if(phase==='approach'||phase==='boarding'){
-      const actor=G.scene.getObjectByName('human'); if(actor) {actor.visible=true;actor.rotation.z=0;}
+      const actor=ActorWalk.avatar; if(actor) {actor.visible=true;actor.rotation.z=0;}
       ActorWalk.endApproach();
     }
     Drive.leave();unpark();G.drive=false;clearGate();phase='none';resetPedals();visibility();Modes.fly.p.copy(G.camera.position);
   }
 
   function initMirror() {
-    mirrorTarget=new THREE.WebGLRenderTarget(288,80,{depthBuffer:true});
+    mirrorTarget=new THREE.WebGLRenderTarget(288,80,{type:THREE.HalfFloatType,depthTexture:new THREE.DepthTexture(288,80)});
+    mirrorColor=new THREE.WebGLRenderTarget(288,80,{depthBuffer:false});
     mirrorQuad=new THREE.OrthographicCamera(-1,1,1,-1,0,1);mirrorScene=new THREE.Scene();
-    const mat=new THREE.ShaderMaterial({ uniforms:{uView:{value:mirrorTarget.texture},uExposure:{value:1}},
-      vertexShader:'varying vec2 uvMirror; void main(){uvMirror=vec2(1.-uv.x,uv.y);gl_Position=vec4(position.xy,0.,1.);}',
+    mirrorTone=new THREE.ShaderMaterial({ uniforms:{uView:{value:mirrorTarget.texture},uExposure:{value:1}},
+      vertexShader:'varying vec2 uvMirror; void main(){uvMirror=uv;gl_Position=vec4(position.xy,0.,1.);}',
       fragmentShader:'varying vec2 uvMirror; uniform sampler2D uView; uniform float uExposure; void main(){vec3 c=texture2D(uView,uvMirror).rgb*uExposure; c=clamp((c*(2.51*c+.03))/(c*(2.43*c+.59)+.14),0.,1.); gl_FragColor=vec4(pow(c,vec3(1./2.2)),1.);}',
       depthWrite:false,depthTest:false });
-    mirrorScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat));
+    mirrorFilter=VisualStyle.makeFilter(true);
+    mirrorScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mirrorFilter));
   }
   function renderMirror(renderer,scene,dt) {
     if(phase!=='driving' && phase!=='grid')return;
@@ -268,10 +270,17 @@ const DriveRace = (() => {
         vehiclePoint(mirrorCam.position,0,1.08,-1.84);vehiclePoint(toward,0,.8,-28);mirrorCam.lookAt(toward);mirrorCam.updateProjectionMatrix();
         renderer.shadowMap.autoUpdate=false;renderer.autoClear=true;renderer.setRenderTarget(mirrorTarget);renderer.setScissorTest(false);
         renderer.render(scene,mirrorCam);
+        mirrorTone.uniforms.uExposure.value=G.info.exposure||1;
+        mirrorScene.children[0].material=mirrorTone;renderer.setRenderTarget(mirrorColor);renderer.render(mirrorScene,mirrorQuad);
       }
       renderer.setRenderTarget(null);renderer.setViewport(screen.left+3,innerHeight-screen.bottom+3,width,height);
       renderer.setScissor(screen.left+3,innerHeight-screen.bottom+3,width,height);renderer.setScissorTest(true);renderer.autoClear=false;
-      mirrorScene.children[0].material.uniforms.uExposure.value=G.info.exposure||1;renderer.render(mirrorScene,mirrorQuad);
+      const snap=VisualStyle.usesRaster()||PixelFit.enabled;
+      const density=PixelFit.enabled?renderer.getPixelRatio()/PixelFit.scale:VisualStyle.raster/Math.max(innerWidth,innerHeight);
+      const w=snap?Math.max(1,Math.round(width*density)):mirrorColor.width;
+      const h=snap?Math.max(1,Math.round(height*density)):mirrorColor.height;
+      VisualStyle.configureFilter(mirrorFilter,mirrorColor.texture,mirrorTarget.depthTexture,mirrorCam.near,mirrorCam.far,w,h,snap);
+      mirrorScene.children[0].material=mirrorFilter;renderer.render(mirrorScene,mirrorQuad);
     } finally {
       renderer.shadowMap.autoUpdate=shadow;renderer.autoClear=clear;renderer.setRenderTarget(previous);renderer.setViewport(view);renderer.setScissor(scissor);renderer.setScissorTest(clipped);
     }
