@@ -37,7 +37,9 @@ const CFG = {
     fogDensity: .00022, fogFalloff: .006,
   },
   sea: { level: 0, swell: .22, windSwell: .9 },
-  post: { exposure: 1, nightGain: 3.2, snowStop: .38, bloom: 1, vignette: .38, grain: .028 },
+  light: { occlusion: .5, bounce: .05 },       // the light field: how much the canopy blocks the sky's fill, how much sunlit canopy gives back
+  post: { exposure: 1, nightGain: 3.2, snowStop: .38, shafts: .9, fringe: .0009,      // fringe: colour fringing at the frame's edge; much more than this turns thin dark things against the sky purple
+    bloom: 1, vignette: .38, grain: .028 },
   camera: { fov: 60, flySpeed: 7, flyFast: 40, eye: 1.66, walkSpeed: 1.35 },
   car: {
     mass: 980, inertia: [1450, 1650, 520], comY: -.26,

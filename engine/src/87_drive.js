@@ -11,7 +11,7 @@ const Drive = (() => {
   const car = { p: V(), q: new THREE.Quaternion(), v: V(), w: V(), comp: [0, 0, 0, 0], len: [.2, .2, .2, .2], spin: [0, 0, 0, 0], steer: 0, gear: 1, rpm: 900, slip: 0, thr: 0, air: 0, surf: 0, bad: 0 };
   const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, keys = new Set(), gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
   const bx = V(), by = V(), bz = V(), F = V(), Tq = V(), A = V(), C = V(), r = V(), vC = V(), wf = V(), ws = V(), nrm = V(), f = V(), tmp = V(), camP = V(), dir = V(), tgt = V(), dq = new THREE.Quaternion(), mm = new THREE.Matrix4(), QY = new THREE.Quaternion().setFromAxisAngle(YAX, Math.PI);
-  let body = null, hitT = 0; const vPrev = V(), cm = V(), _i = { x: 0, y: 0, z: 0 };
+  let body = null, hitT = 0; const tr0 = [V(), V()], tr1 = V(); let trOn = [false, false]; const vPrev = V(), cm = V(), _i = { x: 0, y: 0, z: 0 };
   let grp = null, wheels = [], on = false, paused = false, camMode = 0, hud, menu, lapT = 0, lapOn = false, last = 0, best = 0, prog = 0, lastI = 0, camInit = false, snd = null, drive = 0, brake = 0, shiftT = 0, wet = 0, pad = [false, false, false];
   try { best = +localStorage.getItem('oneworld.bestLap') || 0; } catch (e) {}
   const fmt = s => s ? Math.floor(s / 60) + ':' + (s % 60).toFixed(2).padStart(5, '0') : '-:--.--';
@@ -115,6 +115,9 @@ const Drive = (() => {
       if (body) { hitT -= dt; const dv = tmp.copy(car.v).sub(vPrev).length(); vPrev.copy(car.v); if (dv > 2.2 && hitT <= 0) { Phys.thump(Math.min(1, dv / 9)); hitT = .22; } }      // a jolt in the velocity is a hit: let it be heard
       const sunk = car.p.y < .6 && Island.surf(car.p.x, car.p.z)[0] < -.6; car.bad = by.y < .3 || (!body && car.p.y < -1.2) ? car.bad + dt : sunk ? car.bad + dt * .4 : 0; if (car.bad > 1.6 || !isFinite(car.p.x) || car.p.y < -6) back(); }
     grp.position.copy(car.p); grp.quaternion.copy(car.q); wheels.forEach((w, i) => { w.position.set(WL[i].x, WL[i].y - car.len[i], WL[i].z); w.rotation.set(car.spin[i], i < 2 ? car.steer : 0, 0); });
+    if (typeof FX !== 'undefined' && !paused) for (let k = 0; k < 2; k++) { const i = k + 2, sv = car.v.length(), loose = car.surf !== 0 ? 1 : 0, spray = snowK > .25 || wet > .5 ? 1 : 0, slide = car.slip > .45 ? 1 : 0, emit = car.comp[i] > 0 && sv > 4 && (loose || spray || slide);
+      tr1.copy(car.p).addScaledVector(bx, WL[i].x).addScaledVector(by, WL[i].y - car.len[i] - RAD + .12).addScaledVector(bz, WL[i].z - .25);
+      if (emit && trOn[k] && tr1.distanceToSquared(tr0[k]) > .16) { FX.trail(tr0[k].clone(), tr1.clone(), (.16 + .1 * Math.min(1, sv / 20)) * (spray ? 1.3 : 1), spray || (slide && !loose) ? 1 : 0); tr0[k].copy(tr1); } else if (!trOn[k] || !emit) tr0[k].copy(tr1); trOn[k] = emit; }
     const sp = car.v.length(), sgn = inp.look ? -1 : 1; dir.copy(bz); dir.y = 0; if (sp > 4) dir.lerp(tmp.copy(car.v).setY(0).normalize(), .35); dir.normalize();
     if (camMode === 2) { camera.position.copy(car.p).addScaledVector(by, .64).addScaledVector(bz, .3); camera.quaternion.copy(car.q).multiply(QY); if (inp.look) camera.quaternion.multiply(QY); }
     else { const dist = camMode ? 9.5 : 6.4, hgt = camMode ? 3.4 : 2.2; tgt.copy(car.p).addScaledVector(dir, -dist * sgn); tgt.y += hgt; if (!camInit) { camP.copy(tgt); camInit = true; } camP.lerp(tgt, 1 - Math.exp(-dt * 6));

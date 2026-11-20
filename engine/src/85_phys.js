@@ -67,6 +67,7 @@ const Phys = (() => {
   function blast(x, y, z, power = PC.blast.power, rad = PC.blast.radius) { if (!ready) return 0; let n = 0;
     for (const e of bodies) { if (!e.on) continue; const t = e.b.translation(); _d.set(t.x - x, t.y - y + .5, t.z - z); const d = _d.length(); if (d > rad) continue; const m = e.b.mass(), J = Math.min(power * (1 - d / rad), m * 22); _d.multiplyScalar(J / Math.max(d, .2));
       _v.x = _d.x; _v.y = _d.y; _v.z = _d.z; e.b.applyImpulse(_v, true); _v.x = rr(-1, 1) * J * .05; _v.y = rr(-1, 1) * J * .05; _v.z = rr(-1, 1) * J * .05; e.b.applyTorqueImpulse(_v, true); n++; }
+    if (typeof FX !== 'undefined') { FX.blast(x, y, z, rad); thump(1); return n; }
     const fl = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12), new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: .8, depthWrite: false, blending: THREE.AdditiveBlending })); fl.position.set(x, y, z); scene.add(fl); blasts.push({ m: fl, t: 0, rad });
     thump(1); return n; }
   function thump(k) { const S = G.snd; if (!S || !S.ac || !S.out) return; const ac = S.ac, n = ac.sampleRate * .5 | 0, bf = ac.createBuffer(1, n, ac.sampleRate), d = bf.getChannelData(0); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);

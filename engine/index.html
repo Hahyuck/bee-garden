@@ -159,7 +159,9 @@ const CFG = {
     fogDensity: .00022, fogFalloff: .006,
   },
   sea: { level: 0, swell: .22, windSwell: .9 },
-  post: { exposure: 1, nightGain: 3.2, snowStop: .38, bloom: 1, vignette: .38, grain: .028 },
+  light: { occlusion: .5, bounce: .05 },       // the light field: how much the canopy blocks the sky's fill, how much sunlit canopy gives back
+  post: { exposure: 1, nightGain: 3.2, snowStop: .38, shafts: .9, fringe: .0009,      // fringe: colour fringing at the frame's edge; much more than this turns thin dark things against the sky purple
+    bloom: 1, vignette: .38, grain: .028 },
   camera: { fov: 60, flySpeed: 7, flyFast: 40, eye: 1.66, walkSpeed: 1.35 },
   car: {
     mass: 980, inertia: [1450, 1650, 520], comY: -.26,
@@ -961,6 +963,46 @@ const Garden = (() => {
   return { build, bee, leave, DUR, grp, cat: null, get T() { return T; } };
 })();
 
+// ===== 46_lightfield.js =====
+
+// ---- local indirect light from a field, after Pixel Aleste's irradiance field: a map of the world seen from above that every lit
+//      material reads. Where there is mass overhead or beside (here: the forest), the sky's fill is blocked at its foot; where that
+//      mass faces the sun, it hands coloured light back to what stands next to it. On top of that, a few hot spots (blasts) light
+//      their surroundings for as long as they burn. One small texture for the whole island, built once; no tracing at run time. ----
+const LightField = (() => {
+  const C = CFG.light, N = 260, CELL = 4, HOT = [new THREE.Vector4(0, 0, 0, 0), new THREE.Vector4(0, 0, 0, 0)], hotT = [0, 0];
+  G.U.uLfTex = { value: null }; G.U.uLfFrame = { value: new THREE.Vector4(0, 0, 1, 0) }; G.U.uLfBounce = { value: new THREE.Vector3() }; G.U.uLfHot = { value: HOT };
+  THREE.ShaderChunk.fog_pars_fragment += `
+#ifdef USE_FOG
+uniform sampler2D uLfTex; uniform vec4 uLfFrame; uniform vec4 uLfHot[2]; uniform vec3 uLfBounce;
+vec3 lfLight(vec3 irr, vec3 wp){
+  vec3 hot = vec3(0.); for (int i = 0; i < 2; i++) { vec3 d = wp - uLfHot[i].xyz; hot += vec3(1., .42, .12) * uLfHot[i].w / (1. + dot(d, d) * .03); }
+  vec2 uv = (wp.xz - uLfFrame.xy) * uLfFrame.z; if (uLfFrame.w < .5 || any(lessThan(uv, vec2(0.))) || any(greaterThan(uv, vec2(1.)))) return irr + hot;
+  vec4 c = texture2D(uLfTex, uv); float top = c.b * 400., low = 1. - smoothstep(top - 6., top + 5., wp.y);
+  vec2 g = c.ga * 2. - 1.; float face = max(dot(-g, normalize(uSunDir.xz + 1e-4)), 0.);
+  return irr * (1. - ${C.occlusion.toFixed(2)} * c.r * low) + uLfBounce * face * low + hot; }
+#endif`;
+  THREE.ShaderChunk.lights_fragment_begin += '\n#if defined( RE_IndirectDiffuse ) && defined( USE_FOG )\n irradiance = lfLight(irradiance, vFogW);\n#endif\n';
+
+  function build() { const x0 = Island.IC.x - N * CELL / 2, z0 = Island.IC.z - N * CELL / 2, den = new Float32Array(N * N), top = new Float32Array(N * N), tmp = new Float32Array(N * N);
+    // how much canopy stands over each 4 m cell, and how high it reaches
+    for (const c of Island.FOREST.list) for (const L of c.t) for (const t of L) { const cx = Math.floor((t[0] - x0) / CELL), cz = Math.floor((t[2] - z0) / CELL), h = t[1] + 20 * t[5];
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const i = cx + a, j = cz + b; if (i < 0 || j < 0 || i >= N || j >= N) continue; const k = j * N + i; den[k] += a || b ? .16 : .5; if (h > top[k]) top[k] = h; } }
+    for (let pass = 0; pass < 2; pass++) { for (let j = 1; j < N - 1; j++) for (let i = 1; i < N - 1; i++) { const k = j * N + i; tmp[k] = (den[k] * 2 + den[k - 1] + den[k + 1] + den[k - N] + den[k + N]) / 6; } den.set(tmp); }
+    const px = new Uint8Array(N * N * 4); let cells = 0;
+    for (let j = 1; j < N - 1; j++) for (let i = 1; i < N - 1; i++) { const k = j * N + i, d = clamp(den[k]), gx = clamp((den[k + 1] - den[k - 1]) * 2.2, -1, 1), gz = clamp((den[k + N] - den[k - N]) * 2.2, -1, 1); if (d > .05) cells++;
+      px[k * 4] = d * 255; px[k * 4 + 1] = (gx * .5 + .5) * 255; px[k * 4 + 2] = clamp(Math.max(top[k], top[k - 1], top[k + 1], top[k - N], top[k + N]) / 400) * 255; px[k * 4 + 3] = (gz * .5 + .5) * 255; }
+    for (let k = 0; k < N * N; k++) if (px[k * 4 + 1] === 0 && px[k * 4 + 3] === 0) { px[k * 4 + 1] = 127; px[k * 4 + 3] = 127; }
+    const tex = new THREE.DataTexture(px, N, N, THREE.RGBAFormat); tex.magFilter = tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
+    G.U.uLfTex.value = tex; G.U.uLfFrame.value.set(x0, z0, 1 / (N * CELL), Q.has('nofield') ? 0 : 1); G.info.lightField = { cells };
+    G.tick.push((t, dt) => { const s = G.sun, w = typeof Weather !== 'undefined' ? Weather.S.cover : 0, k = s.intensity * C.bounce;      // the canopy's colour, or the snow on it, times the sun
+      G.U.uLfBounce.value.set(s.color.r * lerp(.1, .8, w), s.color.g * lerp(.15, .84, w), s.color.b * lerp(.05, .9, w)).multiplyScalar(k);
+      for (let i = 0; i < 2; i++) if (HOT[i].w > 0) { hotT[i] += dt; HOT[i].w = Math.max(0, HOT[i].w - dt * HOT[i].w * 4 - dt * 2); } }); }
+  // a hot spot: something burning at a place, lighting what is near it until it fades
+  function hot(x, y, z, power) { const i = HOT[0].w <= HOT[1].w ? 0 : 1; HOT[i].set(x, y, z, power); hotT[i] = 0; }
+  return { build, hot };
+})();
+
 // ===== 80_post.js =====
 
 // ---- the lens and the film, from the Bee Garden: the scene is drawn into a floating-point picture with depth; a depth of field
@@ -984,14 +1026,22 @@ void main(){ vec3 c = vec3(0.); for (int i = 0; i < 4; i++) { vec2 o = vec2(floa
   const BLUR = `varying vec2 vUv; uniform sampler2D tC; uniform vec2 uDir;
 void main(){ vec3 c = texture2D(tC, vUv).rgb * .227; c += (texture2D(tC, vUv + uDir * 1.385).rgb + texture2D(tC, vUv - uDir * 1.385).rgb) * .316;
   c += (texture2D(tC, vUv + uDir * 3.231).rgb + texture2D(tC, vUv - uDir * 3.231).rgb) * .0703; gl_FragColor = vec4(c, 1.); }`;
-  const FINAL = /* glsl */`varying vec2 vUv; uniform sampler2D tC, tB1, tB2; uniform float uExp, uTime, uAspect, uVig, uGrain, uBloom;
+  const FINAL = /* glsl */`varying vec2 vUv; uniform sampler2D tC, tB1, tB2, tD; uniform float uExp, uTime, uAspect, uVig, uGrain, uBloom, uShafts, uFringe; uniform vec2 uSunScr; uniform vec3 uShaftCol, uHeat[2];
 float hash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), 0., 1.); }
-void main(){ vec2 dir = vUv - .5; float r = length(dir * vec2(uAspect, 1.)) / length(vec2(uAspect, 1.) * .5), ca = .004 * r * r;
-  vec3 c = texture2D(tC, vUv).rgb; c.r = texture2D(tC, vUv + dir * ca).r; c.b = texture2D(tC, vUv - dir * ca).b;
-  vec3 col = c * uExp + (texture2D(tB1, vUv).rgb * .16 + texture2D(tB2, vUv).rgb * .2) * uBloom;
+void main(){ vec2 uv = vUv;
+  // hot air in front of the lens bends what is behind it
+  for (int i = 0; i < 2; i++) { vec2 d = uv - uHeat[i].xy; d.x *= uAspect; float mask = exp(-dot(d, d) / .012) * uHeat[i].z; uv.x += sin(uv.y * 205. + uTime * 46. + sin(uv.x * 90.)) * .0026 * mask; uv.y += sin(uv.x * 188. - uTime * 42.) * .0018 * mask; }
+  vec2 dir = uv - .5; float r = length(dir * vec2(uAspect, 1.)) / length(vec2(uAspect, 1.) * .5), ca = uFringe * r * r;
+  vec3 c = texture2D(tC, uv).rgb; c.r = texture2D(tC, uv + dir * ca).r; c.b = texture2D(tC, uv - dir * ca).b;
+  vec3 col = c * uExp + (texture2D(tB1, uv).rgb * .16 + texture2D(tB2, uv).rgb * .2) * uBloom;
+  // shafts of light: walk from the pixel towards the sun on screen; wherever the sky shows through (nothing in the depth), light gets past
+  if (uShafts > .001) { vec2 toSun = uSunScr - uv; float tr = 0.;
+    for (int i = 0; i < 14; i++) { float f = (float(i) + .5) / 14.; vec2 q = uv + toSun * f * .88; float open = step(.99997, texture2D(tD, q).r) * step(0., q.x) * step(q.x, 1.) * step(0., q.y) * step(q.y, 1.); tr += open * (.12 + min(1.5, texture2D(tB2, q).r)) * (1. - f * .68); }
+    col += uShaftCol * tr / 14. * uShafts * exp(-length(toSun * vec2(uAspect, 1.)) * 2.5); }
   col *= 1. - uVig * pow(r, 2.6); col = aces(col * 1.05); float l = dot(col, vec3(.2126, .7152, .0722)); col = mix(vec3(l), col, 1.1);
   col = pow(max(col, 0.), vec3(1. / 2.2)); col += (hash12(gl_FragCoord.xy + fract(uTime * 3.17) * 517.) - .5) * uGrain; gl_FragColor = vec4(col, 1.); }`;
+  const heatP = [{ p: new THREE.Vector3(), k: 0 }, { p: new THREE.Vector3(), k: 0 }], _s = new THREE.Vector3();
   let R, quad, qcam, qscene, rtMain, rtDof, b1a, b1b, b2a, b2b, W = 0, H = 0, exp = C.exposure;
   const lens = { focus: 10, aperture: 0 };       // a mode sets these; aperture 0 means no depth of field
   const mat = (fs, u) => new THREE.ShaderMaterial({ vertexShader: VS, fragmentShader: fs, uniforms: u, depthTest: false, depthWrite: false });
@@ -999,7 +1049,9 @@ void main(){ vec2 dir = vUv - .5; float r = length(dir * vec2(uAspect, 1.)) / le
   function build(renderer) { R = renderer; qcam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1); qscene = new THREE.Scene(); quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); quad.frustumCulled = false; qscene.add(quad);
     M.dof = mat(DOF, { tC: { value: null }, tD: { value: null }, uRes: { value: new THREE.Vector2() }, uNear: { value: .3 }, uFar: { value: 1 }, uFocus: { value: 1 }, uApK: { value: 0 }, uMaxC: { value: 14 }, uStep: { value: 1.1 }, uJit: { value: 0 } });
     M.bright = mat(BRIGHT, { tC: { value: null }, uPx: { value: new THREE.Vector2() }, uExp: { value: 1 } }); M.blur = mat(BLUR, { tC: { value: null }, uDir: { value: new THREE.Vector2() } });
-    M.fin = mat(FINAL, { tC: { value: null }, tB1: { value: null }, tB2: { value: null }, uExp: { value: 1 }, uTime: G.uTime, uAspect: { value: 1 }, uVig: { value: C.vignette }, uGrain: { value: C.grain }, uBloom: { value: C.bloom } }); }
+    M.fin = mat(FINAL, { tC: { value: null }, tB1: { value: null }, tB2: { value: null }, uExp: { value: 1 }, uTime: G.uTime, uAspect: { value: 1 }, uVig: { value: C.vignette }, uGrain: { value: C.grain }, uBloom: { value: C.bloom }, uFringe: { value: C.fringe }, tD: { value: null }, uShafts: { value: 0 }, uSunScr: { value: new THREE.Vector2() }, uShaftCol: { value: new THREE.Vector3() }, uHeat: { value: [new THREE.Vector3(), new THREE.Vector3()] } }); }
+  // heat(world position, strength): the air shimmers there for a second or two
+  function heat(p, k) { const h = heatP[0].k <= heatP[1].k ? heatP[0] : heatP[1]; h.p.copy(p); h.k = k; }
   function size() { const s = R.getDrawingBufferSize(new THREE.Vector2()), w = Math.max(8, s.x), h = Math.max(8, s.y); if (rtMain && w === W && h === H) return; W = w; H = h; for (const t of [rtMain, rtDof, b1a, b1b, b2a, b2b]) if (t) t.dispose();
     const hf = { type: THREE.HalfFloatType, depthBuffer: false };
     rtMain = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, samples: LOW ? 0 : 4, depthTexture: new THREE.DepthTexture(W, H) }); rtDof = new THREE.WebGLRenderTarget(W, H, hf);
@@ -1012,8 +1064,75 @@ void main(){ vec2 dir = vUv - .5; float r = length(dir * vec2(uAspect, 1.)) / le
     M.bright.uniforms.tC.value = src.texture; M.bright.uniforms.uPx.value.set(1 / W, 1 / H); M.bright.uniforms.uExp.value = exp; pass(M.bright, b1a);
     const bl = (from, to, x, y) => { M.blur.uniforms.tC.value = from.texture; M.blur.uniforms.uDir.value.set(x, y); pass(M.blur, to); };
     bl(b1a, b1b, 1 / b1a.width, 0); bl(b1b, b1a, 0, 1 / b1a.height); bl(b1a, b2b, 1 / b2a.width, 0); bl(b2b, b2a, 0, 1 / b2a.height);
-    const f = M.fin.uniforms; f.tC.value = src.texture; f.tB1.value = b1a.texture; f.tB2.value = b2a.texture; f.uExp.value = exp; f.uAspect.value = W / H; pass(M.fin, null); }
-  return { build, render, lens };
+    const f = M.fin.uniforms; f.tC.value = src.texture; f.tB1.value = b1a.texture; f.tB2.value = b2a.texture; f.uExp.value = exp; f.uAspect.value = W / H; f.tD.value = rtMain.depthTexture;
+    // where the sun is on the screen, and whether its shafts can be seen: low sun, in front of the lens, not behind a storm
+    { const sd = Sky.sunDir, st = typeof Weather !== 'undefined' ? Weather.S.storm : 0; _s.copy(camera.position).addScaledVector(sd, 1000).project(camera); const front = _s.z < 1 && Math.abs(_s.x) < 1.6 && Math.abs(_s.y) < 1.6;
+      f.uShafts.value = front ? C.shafts * sm(-.03, .08, sd.y) * (1 - sm(.35, .8, sd.y)) * (1 - st) * (lens.aperture > 0 ? 0 : 1) : 0; f.uSunScr.value.set(_s.x * .5 + .5, _s.y * .5 + .5); f.uShaftCol.value.copy(Sky.U.uSkyK.value).multiplyScalar(1.4); }
+    heatP.forEach((h, i) => { h.k = Math.max(0, h.k - (dt || .016) * .7); _s.copy(h.p).project(camera); f.uHeat.value[i].set(_s.x * .5 + .5, _s.y * .5 + .5, _s.z < 1 ? h.k * clamp(18 / Math.max(camera.position.distanceTo(h.p), 4)) : 0); });
+    pass(M.fin, null); }
+  return { build, render, lens, heat };
+})();
+
+// ===== 82_effects.js =====
+
+// ---- effects that come and go, after Pixel Aleste's: ribbons of dust, spray and fire that the wind carries off (FX.trail),
+//      and a blast drawn as a wispy shell with a ring running out along the ground (FX.blast). Each kind is one draw call.
+//      A blast also lights its surroundings (LightField.hot) and bends the air in front of the lens (Post.heat). ----
+const FX = (() => {
+  const CAP = 2400, _v = new THREE.Vector3(); let geo, from, to, info, mat, head = 0, now = 0; const sites = [];
+  function build(scene) {
+    // ribbons: every recent segment lives in one instanced draw. A segment is a quad between two points, widened on screen,
+    // that grows, drifts with the wind, rises and fades with its age.
+    geo = new THREE.InstancedBufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute([0, -1, 0, 1, -1, 0, 0, 1, 0, 0, 1, 0, 1, -1, 0, 1, 1, 0], 3));
+    const attr = n => { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * CAP), n); a.setUsage(THREE.DynamicDrawUsage); return a; };
+    from = attr(3); to = attr(3); info = attr(3); geo.setAttribute('aFrom', from); geo.setAttribute('aTo', to); geo.setAttribute('aInfo', info); geo.instanceCount = 0;
+    mat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false, uniforms: { now: { value: 0 }, haze: G.U.uFogCol, crosswind: { value: new THREE.Vector2() }, lum: { value: new THREE.Vector3(1, 1, 1) } },
+      vertexShader: `attribute vec3 aFrom, aTo, aInfo; uniform float now; uniform vec2 crosswind; varying float life, edge, depth, kind, noisePos;
+        void main(){ float age = now - aInfo.x; kind = aInfo.z; life = age / (kind > 1.5 ? .5 : kind > .5 ? 1.1 : 2.2); edge = position.y;
+          if (life > 1. || age < 0.) { gl_Position = vec4(2., 2., 2., 1.); return; }
+          vec3 a = (viewMatrix * vec4(aFrom, 1.)).xyz, b = (viewMatrix * vec4(aTo, 1.)).xyz, p = mix(a, b, position.x);
+          p += mat3(viewMatrix) * vec3(crosswind.x, kind > 1.5 ? -2.5 : .9, crosswind.y) * age * (kind > 1.5 ? age : .35 + .3 * age);
+          vec2 d = b.xy / max(1., -b.z) - a.xy / max(1., -a.z), n = vec2(-d.y, d.x) / max(.00001, length(d));
+          noisePos = dot(mix(aFrom, aTo, position.x), vec3(.7, .3, .9));
+          p.xy += n * edge * aInfo.y * (kind > 1.5 ? 1. - life * .6 : 1. + life * 5.) * (1. + life * .24 * sin(noisePos * 1.8));
+          depth = -p.z; gl_Position = projectionMatrix * vec4(p, 1.); }`,
+      fragmentShader: `uniform vec3 haze, lum; varying float life, edge, depth, kind, noisePos;
+        void main(){ float drift = life * .24 * sin(noisePos * 1.8 + life * 3.), soft = 1. - smoothstep(.04, 1., abs(edge + drift));
+          vec3 c = mix(vec3(.3, .26, .2), vec3(.62, .55, .44), smoothstep(-.6, .7, edge)) * lum;                 // dust
+          if (kind > .5) c = vec3(.78, .84, .92) * lum;                                                           // spray, snow, tyre smoke
+          if (kind > 1.5) c = mix(vec3(4.3, 2.2, .5), vec3(1.1, .18, .008), life);                               // fire
+          float a = soft * pow(max(0., 1. - life), 1.5) * (.79 + .21 * sin(noisePos + life * 4.)) * (kind > .5 ? .34 : .5) * smoothstep(0., .06, life);
+          if (kind > 1.5) a = soft * (1. - life);
+          gl_FragColor = vec4(mix(c, haze, smoothstep(200., 900., depth) * .68), a); }` });
+    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = 20; scene.add(mesh);
+    // blasts: a pool of shells and rings
+    const sg = new THREE.SphereGeometry(1, LOW ? 28 : 42, LOW ? 14 : 21), rg = new THREE.TorusGeometry(1, .018, 6, LOW ? 64 : 96).rotateX(Math.PI / 2);
+    const shellMat = () => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending, uniforms: { strength: { value: 0 }, phase: { value: 0 }, tint: { value: new THREE.Color() } },
+      vertexShader: `uniform float phase; varying float rim; varying vec3 direction;
+        void main(){ direction = normalize(position); float n = sin(direction.x * 12. + phase * 2.) * sin(direction.z * 16. + direction.y * 7.); vec4 eye = modelViewMatrix * vec4(position * (1. + .012 * n), 1.);
+          rim = 1. - abs(dot(normalize(normalMatrix * normal), normalize(-eye.xyz))); gl_Position = projectionMatrix * eye; }`,
+      fragmentShader: `uniform float strength, phase; uniform vec3 tint; varying float rim; varying vec3 direction;
+        void main(){ float wisps = .54 + .22 * sin(dot(direction, vec3(23., 11., 29.)) + phase * 4.) + .16 * sin(dot(direction, vec3(-41., 19., 8.)));
+          float edge = exp(-pow((rim - .79) * 5.1, 2.)) * (1. - smoothstep(.91, 1., rim)) + .35 * (1. - rim) * (1. - rim), a = edge * wisps * strength; if (a < .009) discard; gl_FragColor = vec4(tint, a); }` });
+    const ringMat = () => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending, uniforms: { strength: { value: 0 }, phase: { value: 0 }, tint: { value: new THREE.Color() } },
+      vertexShader: `uniform float phase; varying float angle, section;
+        void main(){ angle = uv.x * 6.283185; float split = sin(angle * 7. + phase * 4.) * sin(angle * 11. - phase * 2.); vec4 eye = modelViewMatrix * vec4(position * (1. + .011 * split), 1.);
+          section = abs(dot(normalize(normalMatrix * normal), normalize(-eye.xyz))); gl_Position = projectionMatrix * eye; }`,
+      fragmentShader: `uniform float strength, phase; uniform vec3 tint; varying float angle, section;
+        void main(){ float wave = .5 + .24 * sin(angle * 9. - phase * 4.) + .18 * sin(angle * 17. + 1.) + .10 * sin(angle * 33. + phase), a = strength * smoothstep(.08, .76, wave) * smoothstep(.02, .68, section); if (a < .012) discard; gl_FragColor = vec4(tint, a); }` });
+    for (let i = 0; i < 4; i++) { const shell = new THREE.Mesh(sg, shellMat()), ring = new THREE.Mesh(rg, ringMat()); shell.visible = ring.visible = false; shell.renderOrder = ring.renderOrder = 21; scene.add(shell, ring); sites.push({ shell, ring, t: 9, rad: 1, p: new THREE.Vector3() }); }
+    G.tick.push(tick); }
+  function trail(a, b, width, kind = 0) { if (!geo) return; const i = head++ % CAP; from.setXYZ(i, a.x, a.y, a.z); to.setXYZ(i, b.x, b.y, b.z); info.setXYZ(i, now, width, kind); geo.instanceCount = Math.min(head, CAP); from.needsUpdate = to.needsUpdate = info.needsUpdate = true; }
+  function blast(x, y, z, rad = 9) { if (!geo) return; const s = sites.reduce((a, b) => (b.t > a.t ? b : a)); s.t = 0; s.rad = rad; s.p.set(x, y, z); s.shell.position.copy(s.p); s.ring.position.set(x, y + .15, z);
+    for (let i = 0; i < 22; i++) { const a = i / 22 * TAU + Math.random(), e = .2 + Math.random() * .9, r0 = rad * .08, r1 = rad * (.25 + .35 * Math.random()), c = Math.cos(a) * Math.cos(e), sn = Math.sin(e), d = Math.sin(a) * Math.cos(e);
+      trail(_v.set(x + c * r0, y + sn * r0, z + d * r0).clone(), new THREE.Vector3(x + c * r1, y + sn * r1, z + d * r1), .07 + .06 * Math.random(), 2); trail(new THREE.Vector3(x + c * r1 * .6, y + .2, z + d * r1 * .6), new THREE.Vector3(x + c * r1 * 1.5, y + .5 + sn, z + d * r1 * 1.5), .5 + Math.random() * .5, 0); }
+    if (typeof LightField !== 'undefined') LightField.hot(x, y + 1, z, 60); if (typeof Post !== 'undefined') Post.heat(s.p, 1); }
+  function tick(t, dt) { now = t; mat.uniforms.now.value = t; const W = typeof Weather !== 'undefined' ? Weather.S.wind : null; if (W) mat.uniforms.crosswind.value.set(W.x * .25, W.z * .25);
+    const l = G.hemi ? clamp(G.hemi.intensity / 3 + (G.sun ? G.sun.intensity / 14 : 0), .06, 1.6) : 1; mat.uniforms.lum.value.set(l, l, l);
+    for (const s of sites) { if (s.t > 1.2) { s.shell.visible = s.ring.visible = false; continue; } s.t += dt; const k = s.t / 1.2, r = s.rad * (.12 + .88 * Math.sqrt(k)), fade = (1 - k) * (1 - k);
+      s.shell.visible = s.ring.visible = true; s.shell.scale.set(r * .7, r * .6, r * .7); s.ring.scale.setScalar(r * 1.1);
+      for (const m of [s.shell, s.ring]) { m.material.uniforms.phase.value = t * 3; m.material.uniforms.tint.value.setRGB(lerp(3.2, .9, k), lerp(1.7, .5, k), lerp(.5, .35, k)); } s.shell.material.uniforms.strength.value = fade * .9; s.ring.material.uniforms.strength.value = fade * .8; } }
+  return { build, trail, blast };
 })();
 
 // ===== 85_phys.js =====
@@ -1086,6 +1205,7 @@ const Phys = (() => {
   function blast(x, y, z, power = PC.blast.power, rad = PC.blast.radius) { if (!ready) return 0; let n = 0;
     for (const e of bodies) { if (!e.on) continue; const t = e.b.translation(); _d.set(t.x - x, t.y - y + .5, t.z - z); const d = _d.length(); if (d > rad) continue; const m = e.b.mass(), J = Math.min(power * (1 - d / rad), m * 22); _d.multiplyScalar(J / Math.max(d, .2));
       _v.x = _d.x; _v.y = _d.y; _v.z = _d.z; e.b.applyImpulse(_v, true); _v.x = rr(-1, 1) * J * .05; _v.y = rr(-1, 1) * J * .05; _v.z = rr(-1, 1) * J * .05; e.b.applyTorqueImpulse(_v, true); n++; }
+    if (typeof FX !== 'undefined') { FX.blast(x, y, z, rad); thump(1); return n; }
     const fl = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12), new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: .8, depthWrite: false, blending: THREE.AdditiveBlending })); fl.position.set(x, y, z); scene.add(fl); blasts.push({ m: fl, t: 0, rad });
     thump(1); return n; }
   function thump(k) { const S = G.snd; if (!S || !S.ac || !S.out) return; const ac = S.ac, n = ac.sampleRate * .5 | 0, bf = ac.createBuffer(1, n, ac.sampleRate), d = bf.getChannelData(0); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);
@@ -1148,7 +1268,7 @@ const Drive = (() => {
   const car = { p: V(), q: new THREE.Quaternion(), v: V(), w: V(), comp: [0, 0, 0, 0], len: [.2, .2, .2, .2], spin: [0, 0, 0, 0], steer: 0, gear: 1, rpm: 900, slip: 0, thr: 0, air: 0, surf: 0, bad: 0 };
   const inp = { acc: 0, brk: 0, st: 0, hb: 0, look: false }, keys = new Set(), gnd = [0, 1, 2, 3].map(() => [0, 0, 0, 0, 0, 0]);
   const bx = V(), by = V(), bz = V(), F = V(), Tq = V(), A = V(), C = V(), r = V(), vC = V(), wf = V(), ws = V(), nrm = V(), f = V(), tmp = V(), camP = V(), dir = V(), tgt = V(), dq = new THREE.Quaternion(), mm = new THREE.Matrix4(), QY = new THREE.Quaternion().setFromAxisAngle(YAX, Math.PI);
-  let body = null, hitT = 0; const vPrev = V(), cm = V(), _i = { x: 0, y: 0, z: 0 };
+  let body = null, hitT = 0; const tr0 = [V(), V()], tr1 = V(); let trOn = [false, false]; const vPrev = V(), cm = V(), _i = { x: 0, y: 0, z: 0 };
   let grp = null, wheels = [], on = false, paused = false, camMode = 0, hud, menu, lapT = 0, lapOn = false, last = 0, best = 0, prog = 0, lastI = 0, camInit = false, snd = null, drive = 0, brake = 0, shiftT = 0, wet = 0, pad = [false, false, false];
   try { best = +localStorage.getItem('oneworld.bestLap') || 0; } catch (e) {}
   const fmt = s => s ? Math.floor(s / 60) + ':' + (s % 60).toFixed(2).padStart(5, '0') : '-:--.--';
@@ -1252,6 +1372,9 @@ const Drive = (() => {
       if (body) { hitT -= dt; const dv = tmp.copy(car.v).sub(vPrev).length(); vPrev.copy(car.v); if (dv > 2.2 && hitT <= 0) { Phys.thump(Math.min(1, dv / 9)); hitT = .22; } }      // a jolt in the velocity is a hit: let it be heard
       const sunk = car.p.y < .6 && Island.surf(car.p.x, car.p.z)[0] < -.6; car.bad = by.y < .3 || (!body && car.p.y < -1.2) ? car.bad + dt : sunk ? car.bad + dt * .4 : 0; if (car.bad > 1.6 || !isFinite(car.p.x) || car.p.y < -6) back(); }
     grp.position.copy(car.p); grp.quaternion.copy(car.q); wheels.forEach((w, i) => { w.position.set(WL[i].x, WL[i].y - car.len[i], WL[i].z); w.rotation.set(car.spin[i], i < 2 ? car.steer : 0, 0); });
+    if (typeof FX !== 'undefined' && !paused) for (let k = 0; k < 2; k++) { const i = k + 2, sv = car.v.length(), loose = car.surf !== 0 ? 1 : 0, spray = snowK > .25 || wet > .5 ? 1 : 0, slide = car.slip > .45 ? 1 : 0, emit = car.comp[i] > 0 && sv > 4 && (loose || spray || slide);
+      tr1.copy(car.p).addScaledVector(bx, WL[i].x).addScaledVector(by, WL[i].y - car.len[i] - RAD + .12).addScaledVector(bz, WL[i].z - .25);
+      if (emit && trOn[k] && tr1.distanceToSquared(tr0[k]) > .16) { FX.trail(tr0[k].clone(), tr1.clone(), (.16 + .1 * Math.min(1, sv / 20)) * (spray ? 1.3 : 1), spray || (slide && !loose) ? 1 : 0); tr0[k].copy(tr1); } else if (!trOn[k] || !emit) tr0[k].copy(tr1); trOn[k] = emit; }
     const sp = car.v.length(), sgn = inp.look ? -1 : 1; dir.copy(bz); dir.y = 0; if (sp > 4) dir.lerp(tmp.copy(car.v).setY(0).normalize(), .35); dir.normalize();
     if (camMode === 2) { camera.position.copy(car.p).addScaledVector(by, .64).addScaledVector(bz, .3); camera.quaternion.copy(car.q).multiply(QY); if (inp.look) camera.quaternion.multiply(QY); }
     else { const dist = camMode ? 9.5 : 6.4, hgt = camMode ? 3.4 : 2.2; tgt.copy(car.p).addScaledVector(dir, -dist * sgn); tgt.y += hgt; if (!camInit) { camP.copy(tgt); camInit = true; } camP.lerp(tgt, 1 - Math.exp(-dt * 6));
@@ -1341,6 +1464,8 @@ const Modes = (() => {
     ['바다', 1, async () => Sea.build(scene)],
     ['섬', 16, async p => Island.build(scene, p, tick)],
     ['정원', 10, async p => Garden.build(scene, p, tick)],
+    ['빛 필드', 1, async () => LightField.build()],
+    ['효과', 1, async () => FX.build(scene)],
     ['물리', 3, async () => Phys.init(scene)],
     ['차', 1, async () => Drive.build(scene)],
     ['소리', 1, async () => Sound.build()],
