@@ -20,12 +20,12 @@ const Modes = (() => {
     camera.position.set(a.x + hz * sw, eye - .024 * Math.cos(TAU * ph) * sp, a.z - hx * sw); const cp = Math.cos(pitch); L.set(-Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp);
     m.lookAt(P.set(0, 0, 0), L, UP); camera.quaternion.setFromRotationMatrix(m).multiply(q.setFromAxisAngle(ZAX, Math.sin(Math.PI * ph) * .006 * sp)); camera.fov = 62;
     return '해발 ' + Math.round(a.y) + ' m' + (top ? ' · 정상' : '') + ' · ↑ 빠르게 ↓ 뒤로'; }
-  let beeT = 0;
+  let beeT = 0, eyeOn = false;       // B: the compound-eye view, in the bee's mode
   const MODES = {
     free: { name: '자유', enter() {}, leave() {}, step(camera, dt) { const sp = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? CC.flyFast : CC.flySpeed) * dt, cy = Math.cos(fly.yaw), sy = Math.sin(fly.yaw), f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
       fly.p.x += (-sy * f + cy * s) * sp * Math.cos(fly.pitch); fly.p.z += (-cy * f - sy * s) * sp * Math.cos(fly.pitch); fly.p.y += (Math.sin(fly.pitch) * f + (keys.has('KeyE') ? 1 : 0) - (keys.has('KeyQ') ? 1 : 0)) * sp;
       fly.p.y = Math.max(fly.p.y, Math.max(Island.surf(fly.p.x, fly.p.z)[0], CFG.sea.level) + 1.2); camera.position.copy(fly.p); camera.rotation.set(fly.pitch, fly.yaw, 0, 'YXZ'); camera.fov = CC.fov; return 'W A S D 이동 · 끌어서 둘러보기 · Q E 높이 · Shift 빠르게'; } },
-    bee: { name: '벌', enter() { beeT = 0; }, leave() { Garden.leave(); }, step(camera, dt) { beeT += dt; const r = Garden.bee(beeT, dt, camera); camera.fov = 96; camera.near = .004; Post.lens.focus = .16; Post.lens.aperture = 2.2; return '벌의 비행 ' + Math.floor(Garden.T) + ' / ' + Garden.DUR + '초' + (r && r.walk > .5 ? ' · 걷는 중' : ''); } },
+    bee: { name: '벌', enter() { beeT = 0; }, leave() { Garden.leave(); }, step(camera, dt) { beeT += dt; const r = Garden.bee(beeT, dt, camera); camera.fov = Post.fisheyeFov(camera.aspect); camera.near = .004; Post.lens.focus = 0; Post.lens.aperture = CFG.lens.beeAperture; Post.lens.fisheye = true; Post.lens.eye += ((eyeOn ? 1 : 0) - Post.lens.eye) * (1 - Math.exp(-dt * 6)); return (eyeOn ? '겹눈 · ' : 'B 겹눈 · ') + '벌의 비행 ' + Math.floor(Garden.T) + ' / ' + Garden.DUR + '초' + (r && r.walk > .5 ? ' · 걷는 중' : ''); } },
     hike: { name: '산행', enter() { hike.f = 8; hike.dist = 0; hike.tm = 0; }, leave() {}, step: hikeStep },
     drive: { name: '운전', enter() { G.drive = true; Drive.enter(); }, leave() { G.drive = false; Drive.leave(); fly.p.copy(G.camera.position); }, step(camera, dt) { return Drive.step(camera, dt); } },
   };
@@ -41,12 +41,12 @@ const Modes = (() => {
   // add(id, mode, keyCode, keyLabel): a module brings its own mode, e.g. Modes.add('collect', {...}, 'Digit0', '0')
   const extra = {}; function add(id, mode, code, label) { MODES[id] = mode; if (code) { extra[code] = id; mode.key = label || code; } }
   function step(camera, dt) { if (!booted) { booted = true; const want = Q.get('mode'); if (MODES[want]) cur = want; MODES[cur].enter(); }
-    camera.near = .3; Post.lens.aperture = 0; let line;
+    camera.near = .3; Post.lens.aperture = 0; Post.lens.focus = 10; Post.lens.fisheye = false; if (cur !== 'bee') Post.lens.eye = 0; let line;
     const fix = window.__cam || dbg; if (fix) { P.set(fix[0], fix[1], fix[2]); L.set(fix[3], fix[4], fix[5]); camera.position.copy(P); m.lookAt(P, L, UP); camera.quaternion.setFromRotationMatrix(m); camera.fov = fix[6] || CC.fov; camera.near = fix[7] || .3; line = ''; }
     else line = MODES[cur].step(camera, dt);
     const high = camera.position.y - Math.max(Island.surf(camera.position.x, camera.position.z)[0], 0); shadows(camera, cur === 'bee' && !fix ? 2 : high > 45 ? 0 : 1);
     if (performance.now() - hudAt > 250) { hudAt = performance.now(); hud.textContent = Object.keys(MODES).map((k, i) => (k === cur ? '▸' : ' ') + (MODES[k].key || i + 1) + ' ' + MODES[k].name).join('   ') + '\n' + line; } }
-  addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); const i = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code); if (i >= 0) set(Object.keys(MODES)[i]); else if (extra[e.code]) set(extra[e.code]); if (cur === 'hike' && e.code.startsWith('Arrow')) e.preventDefault(); });
+  addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); if (e.code === 'KeyB' && !e.repeat && cur === 'bee') eyeOn = !eyeOn; const i = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code); if (i >= 0) set(Object.keys(MODES)[i]); else if (extra[e.code]) set(extra[e.code]); if (cur === 'hike' && e.code.startsWith('Arrow')) e.preventDefault(); });
   addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
   return { step, set, add, MODES, fly, keys, get cur() { return cur; } };
 })();

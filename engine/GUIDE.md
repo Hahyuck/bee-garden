@@ -182,7 +182,8 @@ best = +localStorage.getItem('mygame.best') || 0;
 
 ```js
 Post.lens.focus = 3;        // 3m에 초점
-Post.lens.aperture = 1.2;   // 0이면 심도 없음
+Post.lens.aperture = 40;    // 0이면 심도 없음. 사람 크기의 장면은 30~80, 벌처럼 몇 cm 앞을 볼 때는 1 안팎
+Post.lens.focus = 0;        // 0으로 두면 화면 가운데에 자동으로 초점을 맞춤
 ```
 
 ---
