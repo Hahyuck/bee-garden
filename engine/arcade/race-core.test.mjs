@@ -192,9 +192,12 @@ test('drafting requires an ahead car in the same lane and fades when leaving it'
   assert.equal(race.player.slipstream, true);
   assert.ok(race.player.draft > .2);
   assert.ok(race.stats.draftSeconds > 0);
+  const charged = race.player.draft;
   race.player.lateral = -8;
   stepRace(race, { throttle: 1 }, .25);
   assert.equal(race.player.slipstream, false);
+  assert.ok(race.player.draft > 0 && race.player.draft < charged);
+  drive(race, 3, {});
   assert.equal(race.player.draft, 0);
 });
 
@@ -243,4 +246,31 @@ test('invalid dt and non-finite controls cannot corrupt the simulation', () => {
   stepRace(race, { throttle: NaN, steer: Infinity, brake: -Infinity }, .1);
   for (const key of ['distance', 'lateral', 'speed', 'heading', 'rpm']) assert.ok(Number.isFinite(race.player[key]));
   assert.equal(race.player.speed, 0);
+});
+
+test('drifting tightens the line in a banked corner at a speed cost', () => {
+  const grip = racing(), drift = racing();
+  for (const race of [grip, drift]) {
+    Object.assign(race.player, { distance: 315, speed: 76, lateral: 0 });
+    isolate(race);
+  }
+  drive(grip, .6, { throttle: 1, steer: .6 });
+  drive(drift, .6, { throttle: 1, steer: .6, drift: true });
+  assert.ok(drift.player.lateral > grip.player.lateral);
+  assert.ok(drift.player.speed < grip.player.speed);
+});
+
+test('a rival commits to an open passing lane and waits for a car alongside', () => {
+  const open = racing(), blocked = racing();
+  for (const race of [open, blocked]) {
+    isolate(race);
+    Object.assign(race.opponents[0], { distance: 100, lateral: -3.3, speed: 66 });
+    Object.assign(race.opponents[1], { distance: 115, lateral: -3.3, baseLane: -3.3, speed: 53 });
+  }
+  Object.assign(blocked.player, { distance: 98, lateral: 4.4, speed: 66 });
+  for (const race of [open, blocked]) stepRace(race, {}, 1 / 120);
+  assert.equal(open.opponents[0].passLane, 4.4);
+  assert.equal(blocked.opponents[0].passLane, null);
+  drive(open, .8, {});
+  assert.equal(open.opponents[0].passLane, 4.4);
 });

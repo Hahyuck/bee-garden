@@ -67,7 +67,7 @@ export function createRace({ difficulty = 'normal' } = {}) {
     opponents: NAMES.map((name, i) => ({
       id: i + 1, name, color: COLORS[i], distance: 54 - i * 6,
       lateral: i % 2 ? 3.3 : -3.3, speed: 0, heading: 0,
-      baseLane: i % 2 ? 3.3 : -3.3,
+      baseLane: i % 2 ? 3.3 : -3.3, passLane: null,
       cruiseSpeed: (easy ? 67 : 73) + [1.2, -1.0, 3.4, 0, 2.8, .5, 4.0][i],
     })),
     checkpointIndex: 0, checkpointCount: 9, distanceToCheckpoint: CHECKPOINT_SPACING,
@@ -133,17 +133,34 @@ function updateOpponents(race, dt) {
   const p = race.player;
   for (const o of race.opponents) {
     const track = sampleTrack(o.distance);
-    let targetLane = o.baseLane + 1.1 * Math.sin(o.distance / 170 + o.id * 1.7);
     let targetSpeed = o.cruiseSpeed - (track.curvature ? 2.6 : 0);
-    // Small pace correction keeps the field competitive, never teleports a car.
     targetSpeed += clamp((p.distance - o.distance) / 170, -1.5, 2);
-    for (const other of race.opponents) {
-      if (other === o) continue;
+    const traffic = race.opponents.filter(other => other !== o);
+    let leader = null, leaderGap = 24;
+    for (const other of traffic) {
       const gap = separation(other.distance, o.distance);
-      if (gap > 0 && gap < 20 && Math.abs(other.lateral - o.lateral) < 2.5) {
-        targetLane = o.lateral < 0 ? 4.4 : -4.4;
-        if (gap < 7) targetSpeed = Math.min(targetSpeed, Math.max(0, other.speed - 2));
+      if (gap > 0 && gap < leaderGap && Math.abs(other.lateral - o.lateral) < 2.5) {
+        leader = other;
+        leaderGap = gap;
       }
+    }
+    if (leader && o.passLane === null && targetSpeed > leader.speed + 1.5) {
+      const lane = o.baseLane < 0 ? 4.4 : -4.4;
+      const occupied = [...traffic, p].some(other => {
+        const gap = separation(other.distance, o.distance);
+        return gap > -11 && gap < 28 && Math.abs(other.lateral - lane) < 3.2;
+      });
+      if (!occupied) o.passLane = lane;
+    }
+    // Hold the passing line until the car has cleared traffic in its home lane.
+    if (o.passLane !== null && Math.abs(o.lateral - o.passLane) < .2 &&
+        ![...traffic, p].some(other => {
+          const gap = separation(other.distance, o.distance);
+          return gap > -15 && gap < 32 && Math.abs(other.lateral - o.baseLane) < 3;
+        })) o.passLane = null;
+    const targetLane = o.passLane ?? (o.baseLane + .7 * Math.sin(o.distance / 170 + o.id * 1.7));
+    if (leader) {
+      targetSpeed = Math.min(targetSpeed, Math.max(0, leader.speed + (leaderGap - 8) * .7));
     }
     const oldLane = o.lateral;
     const laneStep = clamp(targetLane - oldLane, -1.7 * dt, 1.7 * dt);
@@ -165,22 +182,24 @@ function updatePlayer(race, input, dt) {
     const gap = separation(o.distance, p.distance);
     if (gap > 5 && gap < 46 && Math.abs(o.lateral - p.lateral) < 2.8 && p.speed > 18) following = true;
   }
-  p.draft = clamp(p.draft + (following ? .9 : -1.4) * dt, 0, 1);
+  p.draft = clamp(p.draft + (following ? .9 : -p.draft * 1.25) * dt, 0, 1);
+  if (!following && p.draft < .015) p.draft = 0;
   p.slipstream = following && p.draft > .12;
   if (p.slipstream) race.stats.draftSeconds += dt;
   if (p.drifting) race.stats.driftSeconds += dt;
-  const limit = TOP_SPEED + p.draft * 4.4;
-  const acceleration = input.throttle * (17 * (1 - .78 * (p.speed / limit) ** 2) + p.draft);
+  const limit = TOP_SPEED + p.draft * 5.5;
+  const acceleration = input.throttle * (17 * (1 - .78 * (p.speed / limit) ** 2) + p.draft * 2.8);
   const resistance = .95 + .0004 * p.speed * p.speed;
   const braking = input.brake * 28 + (p.drifting ? 3.4 : 0);
   p.speed = clamp(p.speed + (acceleration - resistance - braking) * dt, 0, limit);
 
-  // Most tangent rotation is assisted; the remaining outward drift still needs
-  // steering in a bend. Track-relative heading makes keyboard taps predictable.
-  const cornerDrift = track.curvature * p.speed * (easy ? .052 : .075);
+  // Lateral load rises with speed squared. Banking helps after turn-in,
+  // while a slide gives a tighter line at the cost of speed and stability.
+  const cornerLoad = track.curvature * p.speed ** 2 / TOP_SPEED;
+  const cornerDrift = cornerLoad * (easy ? .055 : .102) * (1 - track.bank);
   const steerAngle = .08 + .045 * p.speed / TOP_SPEED;
-  const targetHeading = race._steer * steerAngle * (p.drifting ? 1.65 : 1) - cornerDrift * (p.drifting ? 1.55 : 1);
-  p.heading = damp(p.heading, clamp(targetHeading, -.3, .3), p.drifting ? 2.4 : 7.5, dt);
+  const targetHeading = race._steer * steerAngle * (p.drifting ? 1.65 : 1) - cornerDrift;
+  p.heading = damp(p.heading, clamp(targetHeading, -.3, .3), p.drifting ? 4.2 : 7.5, dt);
   p.lateral += Math.sin(p.heading) * p.speed * dt;
   if (Math.abs(p.lateral) > 11.1) {
     p.speed = Math.max(0, p.speed - (8 + p.speed * (easy ? .09 : .16)) * dt);
@@ -222,7 +241,12 @@ function collide(race) {
 
 function updatePosition(race) {
   const next = 1 + race.opponents.filter(o => o.distance > race.player.distance).length;
-  if (race.phase === 'racing' && next < race.position) race.stats.overtakes += race.position - next;
+  if (next < race.position) {
+    race.stats.overtakes += race.position - next;
+    if (race.flash.ttl <= 0 || race.lastEvent?.type === 'pass') {
+      announce(race, 'pass', `OVERTAKE  ·  P${next}`, 'success', 1.15);
+    }
+  }
   race.position = next;
 }
 

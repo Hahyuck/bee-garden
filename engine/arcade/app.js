@@ -134,12 +134,12 @@ function updateHUD(dt) {
   $('time-left').textContent=Math.max(0,race.timeLeft).toFixed(2);$('timer-bar').style.width=`${Math.min(100,race.timeLeft / (race.difficulty === 'easy'?60:45) * 100)}%`;$('time-left').parentElement.classList.toggle('low',race.timeLeft < 10);
   $('lap').textContent=String(Math.min(3,race.lap));$('elapsed').textContent=clock(race.elapsed);
   $('speed').textContent=String(Math.round(Math.max(0,race.player.speed)*3.6)).padStart(3,'0');$('gear').textContent=String(race.player.gear||1);
-  $('driving-status').textContent=race.player.drifting?'DRIFT / 타이어를 흘려라':race.player.slipstream?'SLIPSTREAM / 슬립스트림':Math.abs(race.player.lateral)>TRACK.halfWidth-1?'TRACK LIMIT / 코스로 복귀':'FULL THROTTLE';
+  $('driving-status').textContent=race.player.drifting?'DRIFT / 타이어를 흘려라':race.player.slipstream?'SLIPSTREAM / 슬립스트림':Math.abs(race.player.lateral)>TRACK.halfWidth-1?'TRACK LIMIT / 코스로 복귀':race.player.draft>.12?'DRAFT EXIT / 추월 가속':'FULL THROTTLE';
   $('lap-progress').style.width=`${(race.player.distance % TRACK.length + TRACK.length) % TRACK.length / TRACK.length * 100}%`;
   $('checkpoint-label').textContent=`CP ${(race.checkpointIndex || 0)%3+1} / 3`;
   const rpm=race.player.rpm>1?race.player.rpm/8000:race.player.rpm;
   for(const [i,bar] of [...$('rpm-bars').children].entries())bar.classList.toggle('on',i<Math.max(1,Math.floor((rpm||0)*20)));
-  $('game-status').textContent=`${race.phase} · ${Math.round(race.player.speed*3.6)} km/h · ${race.position}/8위 · ${race.lap}/3랩 · 시간 ${race.timeLeft.toFixed(1)}초 · 체크포인트 ${race.checkpointIndex || 0} · ${viewNames[view]}`;
+  $('game-status').textContent=`${race.phase} · ${Math.round(race.player.speed*3.6)} km/h · ${race.position}/8위 · ${race.lap}/3랩 · 시간 ${race.timeLeft.toFixed(1)}초 · 체크포인트 ${race.checkpointIndex || 0} · 추월 ${race.stats.overtakes} · ${viewNames[view]}`;
   $('game-status').dataset.phase=race.phase;$('game-status').dataset.renderer=renderer.kind;
   paintMap($('race-map'),true);
 }
